@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.4.0)
+# AI CLI Complete Notify (v2.5.0)
 
-![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -393,7 +393,18 @@ Windows notes:
 
 ## Changelog
 
+<details>
+<summary>View version history</summary>
+
 > `v2.x` is the current Tauri-based desktop line. `v1.x` was the Electron-based line.
+
+### 2.5.0
+
+- Fixed Codex session watch reliability so completion reminders no longer depend only on `task_complete`.
+- Serialized Codex session event processing to avoid missed notifications caused by JSONL event races.
+- Fixed premature Codex reminders when Superpowers / parallel subagents are used: child-agent session completions are now coordinated across active Codex sessions, so the completion reminder is sent only after the whole conversation turn finishes.
+- Added a regression test covering the multi-session parent/child-agent completion flow to prevent child session `task_complete` events from triggering standalone completion reminders.
+- Fixed false Codex failure reminders caused by recoverable TUI background `WARN` lines, such as plugin/app-list/tool-suggestion 403 responses that do not stop the current turn.
 
 ### 2.4.0
 
@@ -487,6 +498,8 @@ Windows notes:
 ### 1.0.0
 
 - Initial public release.
+
+</details>
 
 ## 🤝 Contributing
 

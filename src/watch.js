@@ -336,6 +336,10 @@ function looksLikeCodexFailureLine(line) {
     return null;
   }
 
+  if (looksLikeRecoverableCodexBackgroundWarn(cleaned)) {
+    return null;
+  }
+
   const turnErrorMatch = cleaned.match(/\bTurn error:\s*(.+)$/i);
   if (turnErrorMatch && turnErrorMatch[1]) {
     return truncateText(turnErrorMatch[1].trim(), 120);
@@ -361,6 +365,23 @@ function looksLikeCodexFailureLine(line) {
   }
 
   return null;
+}
+
+function looksLikeRecoverableCodexBackgroundWarn(line) {
+  const cleaned = String(line || '').trim();
+  if (!/\bWARN\b/i.test(cleaned)) return false;
+
+  const lower = cleaned.toLowerCase();
+  return [
+    'codex_core::plugins::startup_sync',
+    'startup remote plugin sync failed',
+    'remote plugin sync request',
+    'codex_tui::chatwidget',
+    'failed to load full apps list',
+    'failed to refresh apps list',
+    'failed to load apps:',
+    'failed to load discoverable tool suggestions'
+  ].some((marker) => lower.includes(marker));
 }
 
 function readTailTextUtf8(filePath, maxBytes) {
@@ -869,6 +890,12 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
   // When we attach to a just-created session, its first turn may already be fully written.
   // Re-scan the seed window and treat recent lines as "live" so confirm/complete notifications are not missed.
   const seedCatchupMs = Math.max(0, Number(process.env.CODEX_SEED_CATCHUP_MS || 30000));
+  const multiSessionCompleteQuietMs = Math.max(0, Number(process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS || 750));
+  const completionCoordinator = {
+    pending: null,
+    timer: null,
+    flushing: false
+  };
 
   function isCodexWorkResponseType(type) {
     return [
@@ -939,6 +966,101 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
     if (!raw) return false;
     const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     return lines.some((line) => /^(选项|options?)\s*[:：]/i.test(line));
+  }
+
+  function clearCoordinatedCompletionTimer() {
+    if (!completionCoordinator.timer) return;
+    clearTimeout(completionCoordinator.timer);
+    completionCoordinator.timer = null;
+  }
+
+  function getActiveSessionCount() {
+    let count = 0;
+    for (const session of sessions.values()) {
+      if (session && session.state && session.state.turnActive) count += 1;
+    }
+    return count;
+  }
+
+  function markSessionActive(sessionState) {
+    if (sessionState) sessionState.turnActive = true;
+    if (completionCoordinator.pending) {
+      completionCoordinator.pending.blockedByActive = true;
+      clearCoordinatedCompletionTimer();
+    }
+  }
+
+  async function flushCoordinatedCompletion(reason) {
+    if (completionCoordinator.flushing) return false;
+    if (getActiveSessionCount() > 0) {
+      if (completionCoordinator.pending) completionCoordinator.pending.blockedByActive = true;
+      return false;
+    }
+    const pending = completionCoordinator.pending;
+    if (!pending) return false;
+
+    clearCoordinatedCompletionTimer();
+    completionCoordinator.pending = null;
+    completionCoordinator.flushing = true;
+    try {
+      const result = await sendNotifications(pending.notification);
+      if (pending.state) {
+        pending.state.lastNotifiedAssistantAt = pending.assistantAt;
+        if (pending.turnId) pending.state.lastNotifiedTurnId = pending.turnId;
+        pending.state.confirmNotifiedForTurn = true;
+      }
+      const suffix = pending.logReason || reason || 'task_complete';
+      logger(`[watch][codex] ${summarizeResult(result)} (${suffix})`);
+      return true;
+    } finally {
+      completionCoordinator.flushing = false;
+    }
+  }
+
+  async function stageCoordinatedCompletion(candidate) {
+    if (!candidate || !candidate.notification) return false;
+
+    const current = completionCoordinator.pending;
+    const activeCount = getActiveSessionCount();
+    if (
+      current
+      && !current.blockedByActive
+      && activeCount === 0
+      && sessions.size > 1
+      && multiSessionCompleteQuietMs > 0
+    ) {
+      await flushCoordinatedCompletion(current.logReason || 'multi_session_quiet');
+    }
+
+    const nextCurrent = completionCoordinator.pending;
+    const currentAt = nextCurrent ? Number(nextCurrent.completionAt || 0) : -Infinity;
+    const candidateAt = Number(candidate.completionAt || 0);
+    const hadActiveBlockedPending = Boolean(nextCurrent && nextCurrent.blockedByActive);
+    candidate.blockedByActive = activeCount > 0;
+
+    if (!nextCurrent || candidateAt >= currentAt) {
+      completionCoordinator.pending = candidate;
+    }
+
+    if (activeCount > 0) {
+      clearCoordinatedCompletionTimer();
+      return false;
+    }
+
+    if (hadActiveBlockedPending) {
+      return flushCoordinatedCompletion(candidate.logReason || 'task_complete');
+    }
+
+    if (sessions.size > 1 && multiSessionCompleteQuietMs > 0) {
+      clearCoordinatedCompletionTimer();
+      completionCoordinator.timer = setTimeout(() => {
+        completionCoordinator.timer = null;
+        void flushCoordinatedCompletion('multi_session_quiet');
+      }, multiSessionCompleteQuietMs);
+      return false;
+    }
+
+    return flushCoordinatedCompletion(candidate.logReason || 'task_complete');
   }
 
   function buildRequestUserInputDedupeKey(payload, ts) {
@@ -1055,6 +1177,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
 
   function createSession(filePath) {
     const follower = new JsonlFollower({ seedBytes: 256 * 1024 });
+    let processingChain = Promise.resolve();
     const state = {
       filePath,
       lastEventAt: 0,
@@ -1082,6 +1205,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       lastInteractionResolvedAt: null,
       interactionLoggedForTurn: false,
       interactionNotifiedForTurn: false,
+      turnActive: false,
       pendingCompletion: null
     };
 
@@ -1149,6 +1273,26 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       }, completionGraceMs);
     }
 
+    function maybeStageCodexCompletionFallback(phase, ts) {
+      if (state.interactionRequiredForTurn || state.confirmNotifiedForTurn) return;
+
+      const normalizedPhase = typeof phase === 'string' ? phase.trim().toLowerCase() : '';
+      if (normalizedPhase === 'final_answer') {
+        stagePendingCompletion(ts, {
+          tokenRequired: false,
+          quietMs: finalAnswerQuietMs
+        });
+        return;
+      }
+
+      if (!strictFinalAnswerOnly && !normalizedPhase) {
+        stagePendingCompletion(ts, {
+          tokenRequired: true,
+          quietMs: emptyPhaseQuietMs
+        });
+      }
+    }
+
     async function flushPendingCompletion(reason, options = {}) {
       const pending = state.pendingCompletion;
       const allowWithoutToken = Boolean(options && options.allowWithoutToken);
@@ -1167,28 +1311,38 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
         return false;
       }
 
+      state.turnActive = false;
       const startAt = state.lastUserAt != null ? state.lastUserAt : state.lastTaskStartedAt;
       const durationMs =
         assistantAt != null && startAt != null && assistantAt >= startAt
           ? assistantAt - startAt
           : null;
       const cwd = state.lastCwd || process.cwd();
-      const result = await sendNotifications({
-        source: 'codex',
-        taskInfo: 'Codex 完成',
-        durationMs,
-        cwd,
-        outputContent: state.lastAgentContent || state.lastAssistantText,
-        summaryContext: {
-          userMessage: state.lastUserText,
-          assistantMessage: state.lastAssistantText
+      return stageCoordinatedCompletion({
+        state,
+        turnId: state.currentTurnId,
+        assistantAt,
+        completionAt: assistantAt != null ? assistantAt : Date.now(),
+        logReason: reason,
+        notification: {
+          source: 'codex',
+          taskInfo: 'Codex 完成',
+          durationMs,
+          cwd,
+          outputContent: state.lastAgentContent || state.lastAssistantText,
+          summaryContext: {
+            userMessage: state.lastUserText,
+            assistantMessage: state.lastAssistantText
+          }
         }
       });
+    }
 
-      state.lastNotifiedAssistantAt = assistantAt;
-      state.confirmNotifiedForTurn = true;
-      logger(`[watch][codex] ${summarizeResult(result)} (${reason})`);
-      return true;
+    function enqueueObject(obj, meta) {
+      processingChain = processingChain
+        .then(() => processObject(obj, meta))
+        .catch(() => {});
+      return processingChain;
     }
 
     async function processObject(obj, { seed }) {
@@ -1231,6 +1385,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
           await flushPendingCompletion('before_user_message', { allowWithoutToken: true });
         }
         clearPendingCompletion();
+        markSessionActive(state);
         state.lastTaskStartedAt = null;
         state.lastUserAt = ts;
         state.lastUserText = extractTextFromAny(obj.payload);
@@ -1334,6 +1489,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       }
 
       if (obj.type === 'response_item' && obj.payload && isCodexWorkResponseType(obj.payload.type)) {
+        markSessionActive(state);
         clearPendingCompletion();
         return;
       }
@@ -1350,8 +1506,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
         }
         state.lastAssistantAt = ts != null ? ts : Date.now();
 
-        // Completion for Codex is driven by `event_msg:task_complete` only.
-        // This avoids premature reminders during streaming output and prevents suppressing the real completion.
+        maybeStageCodexCompletionFallback(obj.payload && obj.payload.phase, ts);
         return;
       }
 
@@ -1362,13 +1517,14 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
           if (!seed) {
             await flushPendingCompletion('before_task_started', { allowWithoutToken: true });
           }
-        if (obj.payload && typeof obj.payload.turn_id === 'string') {
-          state.currentTurnId = obj.payload.turn_id;
-        }
-        if (obj.payload && typeof obj.payload.collaboration_mode_kind === 'string') {
-          state.collaborationModeKind = obj.payload.collaboration_mode_kind;
-        }
-        state.lastTaskStartedAt = ts;
+          markSessionActive(state);
+          if (obj.payload && typeof obj.payload.turn_id === 'string') {
+            state.currentTurnId = obj.payload.turn_id;
+          }
+          if (obj.payload && typeof obj.payload.collaboration_mode_kind === 'string') {
+            state.collaborationModeKind = obj.payload.collaboration_mode_kind;
+          }
+          state.lastTaskStartedAt = ts;
           // New turn begins; reset per-turn dedupe/flags.
           state.lastRequestUserInputPrompt = '';
           state.lastConfirmKey = '';
@@ -1376,18 +1532,19 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
           state.interactionRequiredForTurn = false;
           state.pendingRequestUserInputCallIds.clear();
           state.pendingRequestUserInputWithoutId = 0;
-        state.lastInteractionResolvedAt = null;
-        state.interactionLoggedForTurn = false;
-        state.interactionNotifiedForTurn = false;
-        clearPendingCompletion();
-        syncFailureContext({ startedAt: ts != null ? ts : Date.now() });
-        return;
-      }
+          state.lastInteractionResolvedAt = null;
+          state.interactionLoggedForTurn = false;
+          state.interactionNotifiedForTurn = false;
+          clearPendingCompletion();
+          syncFailureContext({ startedAt: ts != null ? ts : Date.now() });
+          return;
+        }
 
         if (kind === 'task_complete') {
+          const turnId = obj.payload && typeof obj.payload.turn_id === 'string' ? obj.payload.turn_id : null;
+          state.turnActive = false;
           if (seed) return;
 
-          const turnId = obj.payload && typeof obj.payload.turn_id === 'string' ? obj.payload.turn_id : null;
           if (turnId && state.lastNotifiedTurnId === turnId) return;
 
           clearPendingCompletion();
@@ -1528,22 +1685,24 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
             || (assistantStaleByInteraction ? '' : String(state.lastAgentContent || state.lastAssistantText || '').trim());
 
           const cwd = state.lastCwd || process.cwd();
-          const result = await sendNotifications({
-            source: 'codex',
-            taskInfo: 'Codex 完成',
-            durationMs,
-            cwd,
-            outputContent: completionOutput,
-            summaryContext: {
-              userMessage: state.lastUserText,
-              assistantMessage: completionOutput || state.lastAssistantText
+          await stageCoordinatedCompletion({
+            state,
+            turnId,
+            assistantAt: completionAt,
+            completionAt,
+            logReason: 'task_complete',
+            notification: {
+              source: 'codex',
+              taskInfo: 'Codex 完成',
+              durationMs,
+              cwd,
+              outputContent: completionOutput,
+              summaryContext: {
+                userMessage: state.lastUserText,
+                assistantMessage: completionOutput || state.lastAssistantText
+              }
             }
           });
-
-          state.lastNotifiedAssistantAt = completionAt;
-          if (turnId) state.lastNotifiedTurnId = turnId;
-          state.confirmNotifiedForTurn = true;
-          logger(`[watch][codex] ${summarizeResult(result)} (task_complete)`);
           return;
         }
 
@@ -1552,24 +1711,25 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
             await flushPendingCompletion('before_user_event', { allowWithoutToken: true });
           }
           clearPendingCompletion();
-        state.lastTaskStartedAt = null;
-        state.lastUserAt = ts;
-        state.lastUserText = extractTextFromAny(obj.payload);
+          markSessionActive(state);
+          state.lastTaskStartedAt = null;
+          state.lastUserAt = ts;
+          state.lastUserText = extractTextFromAny(obj.payload);
           state.lastRequestUserInputPrompt = '';
           state.lastConfirmKey = '';
           state.confirmNotifiedForTurn = false;
           state.interactionRequiredForTurn = false;
           state.pendingRequestUserInputCallIds.clear();
           state.pendingRequestUserInputWithoutId = 0;
-        state.lastInteractionResolvedAt = null;
-        state.interactionLoggedForTurn = false;
-        state.interactionNotifiedForTurn = false;
-        syncFailureContext({
-          userText: state.lastUserText,
-          startedAt: ts != null ? ts : Date.now(),
-        });
-        return;
-      }
+          state.lastInteractionResolvedAt = null;
+          state.interactionLoggedForTurn = false;
+          state.interactionNotifiedForTurn = false;
+          syncFailureContext({
+            userText: state.lastUserText,
+            startedAt: ts != null ? ts : Date.now(),
+          });
+          return;
+        }
 
         if (kind === 'token_count') {
           // Kept for backward-compat (older Codex session formats).
@@ -1578,6 +1738,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
         }
 
         if (kind === 'agent_reasoning') {
+          markSessionActive(state);
           clearPendingCompletion();
           return;
         }
@@ -1604,13 +1765,13 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
           if (content && content.trim()) {
             state.lastAgentContent = content;
           }
+          markSessionActive(state);
 
           syncFailureContext({
             assistantText: state.lastAgentContent || state.lastAssistantText,
           });
 
-          // Confirm alerts for Codex are triggered only by explicit interactive prompts
-          // (request_user_input), not by text output.
+          maybeStageCodexCompletionFallback(obj.payload && obj.payload.phase, ts);
         }
       }
     }
@@ -1618,7 +1779,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
     follower.attach(
       filePath,
       (obj, meta) => {
-        void processObject(obj, meta);
+        void enqueueObject(obj, meta);
       },
       { emitSeed: false }
     );
@@ -1679,8 +1840,9 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       poll: async ({ seedCatchupMs } = {}) => {
         await ensureSeedPrimed(seedCatchupMs);
         follower.poll((obj, meta) => {
-          void processObject(obj, meta);
+          void enqueueObject(obj, meta);
         });
+        await processingChain;
       },
       stop: () => {
         clearPendingCompletion();
@@ -1735,6 +1897,8 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
   const timer = setInterval(tick, Math.max(500, intervalMs || 1000));
   return () => {
     clearInterval(timer);
+    clearCoordinatedCompletionTimer();
+    completionCoordinator.pending = null;
     for (const session of sessions.values()) {
       try {
         if (session && typeof session.stop === 'function') session.stop();

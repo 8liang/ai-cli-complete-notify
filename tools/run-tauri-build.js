@@ -3,9 +3,9 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 function prependPath(env, value) {
-  const current = env.PATH || env.Path || '';
-  env.PATH = `${value}${path.delimiter}${current}`;
-  env.Path = env.PATH;
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'Path';
+  const current = env[pathKey] || '';
+  env[pathKey] = `${value}${path.delimiter}${current}`;
 }
 
 function ensureDir(dirPath) {
@@ -45,6 +45,7 @@ function resolveWindowsRustEnv(rootDir) {
   if (rustupHome) {
     env.RUSTUP_HOME = rustupHome;
   }
+  prependPath(env, path.dirname(process.execPath));
   prependPath(env, path.join(cargoHome, 'bin'));
 
   const tempDir = env.AI_NOTIFY_TMP_DIR || 'D:\\tmp';
@@ -71,11 +72,17 @@ function main() {
     process.exit(1);
   }
 
-  const result = spawnSync('npx', ['tauri', 'build', ...args], {
+  const tauriCliPath = path.join(rootDir, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+  if (!fs.existsSync(tauriCliPath)) {
+    console.error('[tauri-build] Tauri CLI not found. Run `npm install` first.');
+    process.exit(1);
+  }
+
+  const result = spawnSync(process.execPath, [tauriCliPath, 'build', ...args], {
     cwd: rootDir,
     env,
     stdio: 'inherit',
-    shell: process.platform === 'win32'
+    shell: false
   });
 
   if (typeof result.status === 'number') {

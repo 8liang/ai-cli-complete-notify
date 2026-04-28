@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "ai-cli-complete-notify",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "identifier": "com.aicli.complete.notify",
   "build": {
-    "beforeBuildCommand": "npm run build:ui",
-    "beforeDevCommand": "npm run dev:ui",
+    "beforeBuildCommand": "node node_modules/vite/bin/vite.js build",
+    "beforeDevCommand": "node node_modules/vite/bin/vite.js",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist-ui"
   },

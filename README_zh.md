@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.4.0)
+# AI CLI Complete Notify (v2.5.0)
 
-![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -395,7 +395,18 @@ Windows 说明：
 
 ## 版本历史
 
+<details>
+<summary>展开 / 收起版本历史</summary>
+
 > `v2.x` 是当前的 Tauri 桌面版本线，`v1.x` 为旧的 Electron 版本线。
+
+### 2.5.0
+
+- 修复 Codex session 监听稳定性问题，不再只依赖 `task_complete` 才能触发完成提醒。
+- 将 Codex session 事件处理改为串行，避免 JSONL 事件竞态导致漏提醒。
+- 修复使用 Superpowers / 多 Agent 并行时的 Codex 误提醒：子 Agent 的 session 完成事件现在会跨活跃 Codex session 协调，只有整轮对话真正结束后才发送一次完成提醒。
+- 增加多 session 父/子 Agent 完成流程的回归测试，防止子 session 的 `task_complete` 事件单独触发完成提醒。
+- 修复 Codex TUI 后台 `WARN` 日志导致的失败误提醒，例如插件同步、应用列表、工具建议等 403 响应不会影响当前轮次时不再发送失败提醒。
 
 ### 2.4.0
 
@@ -489,6 +500,8 @@ Windows 说明：
 ### 1.0.0
 
 - 初始版本发布。
+
+</details>
 
 
 ## 🤝 贡献
