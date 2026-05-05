@@ -892,9 +892,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
   const seedCatchupMs = Math.max(0, Number(process.env.CODEX_SEED_CATCHUP_MS || 30000));
   const multiSessionCompleteQuietMs = Math.max(0, Number(process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS || 750));
   const completionCoordinator = {
-    pending: null,
-    timer: null,
-    flushing: false
+    groups: new Map()
   };
 
   function isCodexWorkResponseType(type) {
@@ -968,40 +966,93 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
     return lines.some((line) => /^(选项|options?)\s*[:：]/i.test(line));
   }
 
-  function clearCoordinatedCompletionTimer() {
-    if (!completionCoordinator.timer) return;
-    clearTimeout(completionCoordinator.timer);
-    completionCoordinator.timer = null;
+  function getCoordinationGroupKey(sessionOrCandidate) {
+    if (sessionOrCandidate && sessionOrCandidate.notification && sessionOrCandidate.notification.cwd) {
+      return String(sessionOrCandidate.notification.cwd);
+    }
+    if (sessionOrCandidate && sessionOrCandidate.lastCwd) {
+      return String(sessionOrCandidate.lastCwd);
+    }
+    return process.cwd();
   }
 
-  function getActiveSessionCount() {
+  function getCoordinatorGroup(groupKey) {
+    const key = String(groupKey || process.cwd());
+    let group = completionCoordinator.groups.get(key);
+    if (!group) {
+      group = {
+        pending: null,
+        timer: null,
+        flushing: false
+      };
+      completionCoordinator.groups.set(key, group);
+    }
+    return group;
+  }
+
+  function deleteCoordinatorGroupIfIdle(groupKey) {
+    const key = String(groupKey || process.cwd());
+    const group = completionCoordinator.groups.get(key);
+    if (!group) return;
+    if (group.pending || group.timer || group.flushing) return;
+    completionCoordinator.groups.delete(key);
+  }
+
+  function clearCoordinatedCompletionTimer(groupKey) {
+    const group = completionCoordinator.groups.get(String(groupKey || process.cwd()));
+    if (!group || !group.timer) return;
+    clearTimeout(group.timer);
+    group.timer = null;
+  }
+
+  function getActiveSessionCount(groupKey) {
+    const key = String(groupKey || process.cwd());
     let count = 0;
     for (const session of sessions.values()) {
-      if (session && session.state && session.state.turnActive) count += 1;
+      if (
+        session
+        && session.state
+        && session.state.turnActive
+        && getCoordinationGroupKey(session.state) === key
+      ) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  function getTrackedSessionCount(groupKey) {
+    const key = String(groupKey || process.cwd());
+    let count = 0;
+    for (const session of sessions.values()) {
+      if (session && session.state && getCoordinationGroupKey(session.state) === key) count += 1;
     }
     return count;
   }
 
   function markSessionActive(sessionState) {
     if (sessionState) sessionState.turnActive = true;
-    if (completionCoordinator.pending) {
-      completionCoordinator.pending.blockedByActive = true;
-      clearCoordinatedCompletionTimer();
+    const groupKey = getCoordinationGroupKey(sessionState);
+    const group = completionCoordinator.groups.get(groupKey);
+    if (group && group.pending) {
+      group.pending.blockedByActive = true;
+      clearCoordinatedCompletionTimer(groupKey);
     }
   }
 
-  async function flushCoordinatedCompletion(reason) {
-    if (completionCoordinator.flushing) return false;
-    if (getActiveSessionCount() > 0) {
-      if (completionCoordinator.pending) completionCoordinator.pending.blockedByActive = true;
+  async function flushCoordinatedCompletion(reason, groupKey) {
+    const group = completionCoordinator.groups.get(String(groupKey || process.cwd()));
+    if (!group || group.flushing) return false;
+    if (getActiveSessionCount(groupKey) > 0) {
+      if (group.pending) group.pending.blockedByActive = true;
       return false;
     }
-    const pending = completionCoordinator.pending;
+    const pending = group.pending;
     if (!pending) return false;
 
-    clearCoordinatedCompletionTimer();
-    completionCoordinator.pending = null;
-    completionCoordinator.flushing = true;
+    clearCoordinatedCompletionTimer(groupKey);
+    group.pending = null;
+    group.flushing = true;
     try {
       const result = await sendNotifications(pending.notification);
       if (pending.state) {
@@ -1013,54 +1064,58 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       logger(`[watch][codex] ${summarizeResult(result)} (${suffix})`);
       return true;
     } finally {
-      completionCoordinator.flushing = false;
+      group.flushing = false;
+      deleteCoordinatorGroupIfIdle(groupKey);
     }
   }
 
   async function stageCoordinatedCompletion(candidate) {
     if (!candidate || !candidate.notification) return false;
 
-    const current = completionCoordinator.pending;
-    const activeCount = getActiveSessionCount();
+    const groupKey = getCoordinationGroupKey(candidate);
+    const group = getCoordinatorGroup(groupKey);
+    const current = group.pending;
+    const activeCount = getActiveSessionCount(groupKey);
     if (
       current
       && !current.blockedByActive
       && activeCount === 0
-      && sessions.size > 1
+      && getTrackedSessionCount(groupKey) > 1
       && multiSessionCompleteQuietMs > 0
     ) {
-      await flushCoordinatedCompletion(current.logReason || 'multi_session_quiet');
+      await flushCoordinatedCompletion(current.logReason || 'multi_session_quiet', groupKey);
     }
 
-    const nextCurrent = completionCoordinator.pending;
+    const nextCurrent = group.pending;
     const currentAt = nextCurrent ? Number(nextCurrent.completionAt || 0) : -Infinity;
     const candidateAt = Number(candidate.completionAt || 0);
     const hadActiveBlockedPending = Boolean(nextCurrent && nextCurrent.blockedByActive);
     candidate.blockedByActive = activeCount > 0;
+    candidate.groupKey = groupKey;
 
     if (!nextCurrent || candidateAt >= currentAt) {
-      completionCoordinator.pending = candidate;
+      group.pending = candidate;
     }
 
     if (activeCount > 0) {
-      clearCoordinatedCompletionTimer();
+      clearCoordinatedCompletionTimer(groupKey);
       return false;
     }
 
     if (hadActiveBlockedPending) {
-      return flushCoordinatedCompletion(candidate.logReason || 'task_complete');
+      return flushCoordinatedCompletion(candidate.logReason || 'task_complete', groupKey);
     }
 
-    if (sessions.size > 1 && multiSessionCompleteQuietMs > 0) {
-      clearCoordinatedCompletionTimer();
-      completionCoordinator.timer = setTimeout(() => {
-        completionCoordinator.timer = null;
-        void flushCoordinatedCompletion('multi_session_quiet');
+    if (getTrackedSessionCount(groupKey) > 1 && multiSessionCompleteQuietMs > 0) {
+      clearCoordinatedCompletionTimer(groupKey);
+      group.timer = setTimeout(() => {
+        group.timer = null;
+        void flushCoordinatedCompletion('multi_session_quiet', groupKey);
       }, multiSessionCompleteQuietMs);
       return false;
     }
 
-    return flushCoordinatedCompletion(candidate.logReason || 'task_complete');
+    return flushCoordinatedCompletion(candidate.logReason || 'task_complete', groupKey);
   }
 
   function buildRequestUserInputDedupeKey(payload, ts) {
@@ -1897,8 +1952,10 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
   const timer = setInterval(tick, Math.max(500, intervalMs || 1000));
   return () => {
     clearInterval(timer);
-    clearCoordinatedCompletionTimer();
-    completionCoordinator.pending = null;
+    for (const [groupKey] of completionCoordinator.groups.entries()) {
+      clearCoordinatedCompletionTimer(groupKey);
+    }
+    completionCoordinator.groups.clear();
     for (const session of sessions.values()) {
       try {
         if (session && typeof session.stop === 'function') session.stop();
@@ -2423,5 +2480,4 @@ function startWatch({ sources, intervalMs, geminiQuietMs, claudeQuietMs, log, co
 module.exports = {
   startWatch
 };
-
 
