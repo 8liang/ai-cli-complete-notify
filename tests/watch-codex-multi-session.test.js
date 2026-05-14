@@ -127,6 +127,270 @@ test('codex watch notifies only after the parent session completes when subagent
   assert.equal(notifications[0].outputContent, 'parent done');
 });
 
+test('codex watch suppresses Codex Desktop subagent completions from session metadata', async (t) => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-reminder-codex-home-'));
+  const previousEnv = {
+    CODEX_WATCH_BACKEND: process.env.CODEX_WATCH_BACKEND,
+    CODEX_FOLLOW_TOP_N: process.env.CODEX_FOLLOW_TOP_N,
+    CODEX_SEED_CATCHUP_MS: process.env.CODEX_SEED_CATCHUP_MS,
+    CODEX_STRICT_FINAL_ANSWER: process.env.CODEX_STRICT_FINAL_ANSWER,
+    CODEX_MULTI_SESSION_COMPLETE_QUIET_MS: process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS,
+    CODEX_TUI_LOG_PATH: process.env.CODEX_TUI_LOG_PATH,
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+  };
+
+  const notifications = [];
+  const enginePath = require.resolve('../src/engine');
+  const watchPath = require.resolve('../src/watch');
+  const originalEngineCache = require.cache[enginePath];
+  const originalWatchCache = require.cache[watchPath];
+
+  function restore() {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    if (originalEngineCache) require.cache[enginePath] = originalEngineCache;
+    else delete require.cache[enginePath];
+    if (originalWatchCache) require.cache[watchPath] = originalWatchCache;
+    else delete require.cache[watchPath];
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+
+  t.after(restore);
+
+  process.env.CODEX_WATCH_BACKEND = 'sessions';
+  process.env.CODEX_FOLLOW_TOP_N = '5';
+  process.env.CODEX_SEED_CATCHUP_MS = '0';
+  process.env.CODEX_STRICT_FINAL_ANSWER = '1';
+  process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS = '150';
+  process.env.CODEX_TUI_LOG_PATH = path.join(tempHome, 'missing-codex-tui.log');
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+
+  require.cache[enginePath] = {
+    id: enginePath,
+    filename: enginePath,
+    loaded: true,
+    exports: {
+      sendNotifications: async (args) => {
+        notifications.push(args);
+        return { results: [{ ok: true }] };
+      },
+    },
+  };
+  delete require.cache[watchPath];
+  const { startWatch } = require('../src/watch');
+
+  const sessionDir = path.join(tempHome, '.codex', 'sessions', '2026', '04', '28');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const parentFile = path.join(sessionDir, 'parent.jsonl');
+  const childFile = path.join(sessionDir, 'child.jsonl');
+  for (const filePath of [parentFile, childFile]) {
+    fs.writeFileSync(filePath, '', 'utf8');
+  }
+
+  const logs = [];
+  const stop = startWatch({
+    sources: ['codex'],
+    intervalMs: 50,
+    log: (line) => logs.push(line),
+    confirmAlert: { enabled: false },
+  });
+  t.after(() => stop());
+
+  await sleep(650);
+
+  appendJsonl(parentFile, [
+    {
+      timestamp: 1,
+      type: 'session_meta',
+      payload: {
+        id: 'parent-thread',
+        cwd: '/workspace/app',
+        originator: 'Codex Desktop',
+        source: 'vscode',
+      },
+    },
+  ]);
+
+  appendJsonl(childFile, [
+    {
+      timestamp: 2,
+      type: 'session_meta',
+      payload: {
+        id: 'child-thread',
+        cwd: '/workspace/app',
+        originator: 'Codex Desktop',
+        thread_source: 'subagent',
+        source: {
+          subagent: {
+            thread_spawn: {
+              parent_thread_id: 'parent-thread',
+              depth: 1,
+              agent_nickname: 'Euler',
+              agent_role: 'explorer',
+            },
+          },
+        },
+        agent_nickname: 'Euler',
+        agent_role: 'explorer',
+      },
+    },
+    { timestamp: 3, type: 'event_msg', payload: { type: 'task_started', turn_id: 'child-turn' } },
+    { timestamp: 4, type: 'event_msg', payload: { type: 'agent_message', content: 'child done' } },
+    { timestamp: 5, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'child-turn', last_agent_message: 'child done' } },
+  ]);
+
+  await sleep(650);
+  assert.equal(notifications.length, 0, `subagent completion should not notify:\n${logs.join('\n')}`);
+
+  appendJsonl(parentFile, [
+    { timestamp: 6, type: 'event_msg', payload: { type: 'task_started', turn_id: 'parent-turn' } },
+    { timestamp: 7, type: 'event_msg', payload: { type: 'agent_message', content: 'parent done' } },
+    { timestamp: 8, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'parent-turn', last_agent_message: 'parent done' } },
+  ]);
+
+  await waitFor(() => notifications.length === 1);
+  assert.equal(notifications[0].source, 'codex');
+  assert.equal(notifications[0].cwd, '/workspace/app');
+  assert.equal(notifications[0].outputContent, 'parent done');
+});
+
+test('codex watch loads subagent metadata from the file head when tail seed misses it', async (t) => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-reminder-codex-home-'));
+  const previousEnv = {
+    CODEX_WATCH_BACKEND: process.env.CODEX_WATCH_BACKEND,
+    CODEX_FOLLOW_TOP_N: process.env.CODEX_FOLLOW_TOP_N,
+    CODEX_SEED_CATCHUP_MS: process.env.CODEX_SEED_CATCHUP_MS,
+    CODEX_STRICT_FINAL_ANSWER: process.env.CODEX_STRICT_FINAL_ANSWER,
+    CODEX_MULTI_SESSION_COMPLETE_QUIET_MS: process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS,
+    CODEX_TUI_LOG_PATH: process.env.CODEX_TUI_LOG_PATH,
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+  };
+
+  const notifications = [];
+  const enginePath = require.resolve('../src/engine');
+  const watchPath = require.resolve('../src/watch');
+  const originalEngineCache = require.cache[enginePath];
+  const originalWatchCache = require.cache[watchPath];
+
+  function restore() {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    if (originalEngineCache) require.cache[enginePath] = originalEngineCache;
+    else delete require.cache[enginePath];
+    if (originalWatchCache) require.cache[watchPath] = originalWatchCache;
+    else delete require.cache[watchPath];
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+
+  t.after(restore);
+
+  process.env.CODEX_WATCH_BACKEND = 'sessions';
+  process.env.CODEX_FOLLOW_TOP_N = '5';
+  process.env.CODEX_SEED_CATCHUP_MS = '0';
+  process.env.CODEX_STRICT_FINAL_ANSWER = '1';
+  process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS = '150';
+  process.env.CODEX_TUI_LOG_PATH = path.join(tempHome, 'missing-codex-tui.log');
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+
+  require.cache[enginePath] = {
+    id: enginePath,
+    filename: enginePath,
+    loaded: true,
+    exports: {
+      sendNotifications: async (args) => {
+        notifications.push(args);
+        return { results: [{ ok: true }] };
+      },
+    },
+  };
+  delete require.cache[watchPath];
+  const { startWatch } = require('../src/watch');
+
+  const sessionDir = path.join(tempHome, '.codex', 'sessions', '2026', '04', '28');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const parentFile = path.join(sessionDir, 'parent.jsonl');
+  const childFile = path.join(sessionDir, 'large-child.jsonl');
+  fs.writeFileSync(parentFile, '', 'utf8');
+
+  const childMeta = {
+    timestamp: 1,
+    type: 'session_meta',
+    payload: {
+      id: 'large-child-thread',
+      cwd: '/workspace/app',
+      originator: 'Codex Desktop',
+      thread_source: 'subagent',
+      source: {
+        subagent: {
+          thread_spawn: {
+            parent_thread_id: 'parent-thread',
+            depth: 1,
+            agent_nickname: 'Noether',
+            agent_role: 'worker',
+          },
+        },
+      },
+      agent_nickname: 'Noether',
+      agent_role: 'worker',
+    },
+  };
+  const filler = Array.from({ length: 5000 }, (_, index) => JSON.stringify({
+    timestamp: 10 + index,
+    type: 'event_msg',
+    payload: { type: 'token_count' },
+  })).join('\n');
+  fs.writeFileSync(childFile, `${JSON.stringify(childMeta)}\n${filler}\n`, 'utf8');
+
+  const logs = [];
+  const stop = startWatch({
+    sources: ['codex'],
+    intervalMs: 50,
+    log: (line) => logs.push(line),
+    confirmAlert: { enabled: false },
+  });
+  t.after(() => stop());
+
+  await sleep(650);
+
+  appendJsonl(childFile, [
+    { timestamp: 6000, type: 'event_msg', payload: { type: 'task_started', turn_id: 'child-turn' } },
+    { timestamp: 6001, type: 'event_msg', payload: { type: 'agent_message', content: 'large child done' } },
+    { timestamp: 6002, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'child-turn', last_agent_message: 'large child done' } },
+  ]);
+
+  await sleep(650);
+  assert.equal(notifications.length, 0, `large subagent completion should not notify:\n${logs.join('\n')}`);
+
+  appendJsonl(parentFile, [
+    {
+      timestamp: 6003,
+      type: 'session_meta',
+      payload: {
+        id: 'parent-thread',
+        cwd: '/workspace/app',
+        originator: 'Codex Desktop',
+        source: 'vscode',
+      },
+    },
+    { timestamp: 6004, type: 'event_msg', payload: { type: 'task_started', turn_id: 'parent-turn' } },
+    { timestamp: 6005, type: 'event_msg', payload: { type: 'agent_message', content: 'parent done' } },
+    { timestamp: 6006, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'parent-turn', last_agent_message: 'parent done' } },
+  ]);
+
+  await waitFor(() => notifications.length === 1);
+  assert.equal(notifications[0].source, 'codex');
+  assert.equal(notifications[0].cwd, '/workspace/app');
+  assert.equal(notifications[0].outputContent, 'parent done');
+});
+
 test('codex watch does not block an unrelated session completion when another cwd is still active', async (t) => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-reminder-codex-home-'));
   const previousEnv = {
@@ -220,4 +484,95 @@ test('codex watch does not block an unrelated session completion when another cw
     logs.some((line) => line.includes('sent: 1/1') && line.includes('task_complete')),
     `expected notification log, got:\n${logs.join('\n')}`
   );
+});
+
+test('codex watch does not replay copied fork session history from seed catchup', async (t) => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-reminder-codex-fork-home-'));
+  const previousEnv = {
+    CODEX_WATCH_BACKEND: process.env.CODEX_WATCH_BACKEND,
+    CODEX_FOLLOW_TOP_N: process.env.CODEX_FOLLOW_TOP_N,
+    CODEX_SEED_CATCHUP_MS: process.env.CODEX_SEED_CATCHUP_MS,
+    CODEX_STRICT_FINAL_ANSWER: process.env.CODEX_STRICT_FINAL_ANSWER,
+    CODEX_TUI_LOG_PATH: process.env.CODEX_TUI_LOG_PATH,
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+  };
+
+  const notifications = [];
+  const enginePath = require.resolve('../src/engine');
+  const watchPath = require.resolve('../src/watch');
+  const originalEngineCache = require.cache[enginePath];
+  const originalWatchCache = require.cache[watchPath];
+
+  function restore() {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    if (originalEngineCache) require.cache[enginePath] = originalEngineCache;
+    else delete require.cache[enginePath];
+    if (originalWatchCache) require.cache[watchPath] = originalWatchCache;
+    else delete require.cache[watchPath];
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+
+  t.after(restore);
+
+  process.env.CODEX_WATCH_BACKEND = 'sessions';
+  process.env.CODEX_FOLLOW_TOP_N = '5';
+  process.env.CODEX_SEED_CATCHUP_MS = '60000';
+  process.env.CODEX_STRICT_FINAL_ANSWER = '1';
+  process.env.CODEX_TUI_LOG_PATH = path.join(tempHome, 'missing-codex-tui.log');
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+
+  require.cache[enginePath] = {
+    id: enginePath,
+    filename: enginePath,
+    loaded: true,
+    exports: {
+      sendNotifications: async (args) => {
+        notifications.push(args);
+        return { results: [{ ok: true }] };
+      },
+    },
+  };
+  delete require.cache[watchPath];
+  const { startWatch } = require('../src/watch');
+
+  const sessionDir = path.join(tempHome, '.codex', 'sessions', '2026', '05', '14');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const forkFile = path.join(sessionDir, 'fork.jsonl');
+  const copiedAt = Date.now() - 10000;
+
+  appendJsonl(forkFile, [
+    { timestamp: copiedAt, type: 'event_msg', payload: { type: 'task_started', turn_id: 'old-turn-1' } },
+    { timestamp: copiedAt + 100, type: 'event_msg', payload: { type: 'agent_message', content: 'old one done' } },
+    { timestamp: copiedAt + 200, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'old-turn-1', last_agent_message: 'old one done' } },
+    { timestamp: copiedAt + 300, type: 'event_msg', payload: { type: 'task_started', turn_id: 'old-turn-2' } },
+    { timestamp: copiedAt + 400, type: 'event_msg', payload: { type: 'agent_message', content: 'old two done' } },
+    { timestamp: copiedAt + 500, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'old-turn-2', last_agent_message: 'old two done' } },
+  ]);
+
+  const logs = [];
+  const stop = startWatch({
+    sources: ['codex'],
+    intervalMs: 50,
+    log: (line) => logs.push(line),
+    confirmAlert: { enabled: false },
+  });
+  t.after(() => stop());
+
+  await sleep(900);
+  assert.equal(notifications.length, 0, `fork seed history should not notify:\n${logs.join('\n')}`);
+
+  appendJsonl(forkFile, [
+    { timestamp: Date.now(), type: 'event_msg', payload: { type: 'task_started', turn_id: 'new-branch-turn' } },
+    { timestamp: Date.now() + 100, type: 'event_msg', payload: { type: 'agent_message', content: 'new branch done' } },
+    { timestamp: Date.now() + 200, type: 'event_msg', payload: { type: 'task_complete', turn_id: 'new-branch-turn', last_agent_message: 'new branch done' } },
+  ]);
+
+  await waitFor(() => notifications.length === 1);
+  assert.equal(notifications[0].source, 'codex');
+  assert.equal(notifications[0].outputContent, 'new branch done');
 });

@@ -400,9 +400,12 @@ Windows notes:
 
 ### 2.6.0
 
-- Fixed premature Codex reminders when Superpowers / parallel subagents are used: child-agent session completions are now coordinated across active Codex sessions, so the completion reminder is sent only after the whole conversation turn finishes.
+- Fixed premature Codex reminders when Superpowers / parallel subagents are used: Codex Desktop subagent sessions are now detected from `session_meta` and their completion/confirm reminders are suppressed, so the reminder is sent only by the parent conversation when the whole turn finishes.
+- Fixed subagent detection for already-large Codex session files: when Watch attaches mid-session, it now reads the file head for `session_meta` instead of relying only on the tail seed window.
+- Fixed unrelated Codex sessions suppressing each other: completion coordination is now grouped by workspace `cwd`, so a long-running turn in one project no longer blocks completion alerts from another project.
+- Fixed Codex forked-chat replay reminders: copied history in a newly forked session is now treated as seed context only, so the new branch no longer replays completion alerts from the original branch.
 - Fixed false Codex failure reminders caused by recoverable TUI background `WARN` lines, such as plugin/app-list/tool-suggestion 403 responses that do not stop the current turn.
-- Added regression tests for multi-session parent/child-agent completion and recoverable Codex TUI background warnings.
+- Added regression tests for multi-session parent/child-agent completion, Codex Desktop subagent metadata including file-head loading, cwd-grouped session coordination, forked-session history replay, and recoverable Codex TUI background warnings.
 
 ### 2.5.0
 

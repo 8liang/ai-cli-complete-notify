@@ -402,9 +402,12 @@ Windows 说明：
 
 ### 2.6.0
 
-- 修复使用 Superpowers / 多 Agent 并行时的 Codex 误提醒：子 Agent 的 session 完成事件现在会跨活跃 Codex session 协调，只有整轮对话真正结束后才发送一次完成提醒。
+- 修复使用 Superpowers / 多 Agent 并行时的 Codex 误提醒：现在会从 `session_meta` 识别 Codex Desktop 子 Agent session，并跳过子 Agent 的完成/确认提醒，只有父对话整轮结束后才发送一次完成提醒。
+- 修复已存在的大型 Codex session 文件中的子 Agent 识别问题：Watch 中途接入时会从文件头读取 `session_meta`，不再只依赖尾部 seed 窗口。
+- 修复无关 Codex session 互相压制提醒的问题：完成提醒协调现在按工作区 `cwd` 分组，一个项目里的长任务不会再阻塞另一个项目的完成提醒。
+- 修复 Codex fork / 分叉新对话后的历史提醒重放问题：新分支 session 中复制过来的旧历史现在只作为上下文种子，不再重新触发原分支的完成提醒。
 - 修复 Codex TUI 后台 `WARN` 日志导致的失败误提醒，例如插件同步、应用列表、工具建议等 403 响应不会影响当前轮次时不再发送失败提醒。
-- 增加多 session 父/子 Agent 完成流程和 Codex TUI 后台 WARN 过滤的回归测试。
+- 增加多 session 父/子 Agent 完成流程、Codex Desktop 子 Agent 元数据识别及文件头加载、按 cwd 分组协调、fork session 历史重放和 Codex TUI 后台 WARN 过滤的回归测试。
 
 ### 2.5.0
 

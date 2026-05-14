@@ -907,6 +907,25 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
     ].includes(type);
   }
 
+  function getCodexSubagentThreadSpawn(source) {
+    if (!source || typeof source !== 'object') return null;
+    const subagent = source.subagent;
+    if (!subagent || typeof subagent !== 'object') return null;
+    return subagent.thread_spawn && typeof subagent.thread_spawn === 'object'
+      ? subagent.thread_spawn
+      : null;
+  }
+
+  function isCodexSubagentSessionMeta(payload) {
+    if (!payload || typeof payload !== 'object') return false;
+    const threadSource = typeof payload.thread_source === 'string'
+      ? payload.thread_source.trim().toLowerCase()
+      : '';
+    if (threadSource === 'subagent') return true;
+    if (typeof payload.source === 'string' && payload.source.trim().toLowerCase() === 'subagent') return true;
+    return Boolean(getCodexSubagentThreadSpawn(payload.source));
+  }
+
   function extractRequestUserInputText(payload) {
     if (!payload || typeof payload !== 'object') return '需要你确认下一步？';
 
@@ -1243,6 +1262,12 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       lastTaskStartedAt: null,
       currentTurnId: null,
       collaborationModeKind: '',
+      sessionId: null,
+      threadSource: '',
+      parentThreadId: '',
+      agentNickname: '',
+      agentRole: '',
+      isSubagentSession: false,
       lastNotifiedTurnId: null,
       lastCwd: null,
       lastAgentContent: null,
@@ -1329,6 +1354,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
     }
 
     function maybeStageCodexCompletionFallback(phase, ts) {
+      if (state.isSubagentSession) return;
       if (state.interactionRequiredForTurn || state.confirmNotifiedForTurn) return;
 
       const normalizedPhase = typeof phase === 'string' ? phase.trim().toLowerCase() : '';
@@ -1355,6 +1381,11 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       if (pending.tokenRequired && !pending.tokenSeen && !allowWithoutToken) return false;
 
       clearPendingCompletion();
+
+      if (state.isSubagentSession) {
+        logger('[watch][codex] skipped completion (fallback: subagent)');
+        return false;
+      }
 
       if (state.confirmNotifiedForTurn) {
         logger(`[watch][codex] skipped completion (${reason}: confirm alert sent)`);
@@ -1406,6 +1437,44 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
 
       if (!seed) {
         state.lastEventAt = Date.now();
+      }
+
+      if (obj.type === 'session_meta' && obj.payload && typeof obj.payload === 'object') {
+        const meta = obj.payload;
+        if (typeof meta.cwd === 'string' && meta.cwd.trim()) {
+          state.lastCwd = meta.cwd;
+          syncFailureContext({ cwd: meta.cwd });
+        }
+        if (typeof meta.id === 'string' && meta.id.trim()) {
+          state.sessionId = meta.id.trim();
+        }
+        if (typeof meta.thread_source === 'string' && meta.thread_source.trim()) {
+          state.threadSource = meta.thread_source.trim();
+        }
+        if (typeof meta.agent_nickname === 'string' && meta.agent_nickname.trim()) {
+          state.agentNickname = meta.agent_nickname.trim();
+        }
+        if (typeof meta.agent_role === 'string' && meta.agent_role.trim()) {
+          state.agentRole = meta.agent_role.trim();
+        }
+
+        const threadSpawn = getCodexSubagentThreadSpawn(meta.source);
+        if (threadSpawn) {
+          if (typeof threadSpawn.parent_thread_id === 'string' && threadSpawn.parent_thread_id.trim()) {
+            state.parentThreadId = threadSpawn.parent_thread_id.trim();
+          }
+          if (!state.agentNickname && typeof threadSpawn.agent_nickname === 'string' && threadSpawn.agent_nickname.trim()) {
+            state.agentNickname = threadSpawn.agent_nickname.trim();
+          }
+          if (!state.agentRole && typeof threadSpawn.agent_role === 'string' && threadSpawn.agent_role.trim()) {
+            state.agentRole = threadSpawn.agent_role.trim();
+          }
+        }
+
+        if (isCodexSubagentSessionMeta(meta)) {
+          state.isSubagentSession = true;
+        }
+        return;
       }
 
       if (obj.type === 'turn_context') {
@@ -1487,6 +1556,13 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
         }
         state.lastRequestUserInputPrompt = extractRequestUserInputText(obj.payload);
         if (seed) return;
+        if (state.isSubagentSession) {
+          if (!state.interactionLoggedForTurn) {
+            state.interactionLoggedForTurn = true;
+            logger('[watch][codex] skipped confirm (request_user_input: subagent)');
+          }
+          return;
+        }
 
         const confirmEnabled = typeof confirmDetector?.isEnabled === 'function' ? confirmDetector.isEnabled() : true;
         if (!confirmEnabled) {
@@ -1613,6 +1689,12 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
             state.lastAgentContent = lastAgentMessage;
             state.lastAssistantAt = completionAt;
             syncFailureContext({ assistantText: lastAgentMessage });
+          }
+          if (state.isSubagentSession) {
+            if (turnId) state.lastNotifiedTurnId = turnId;
+            const label = state.agentNickname ? ` ${state.agentNickname}` : '';
+            logger(`[watch][codex] skipped completion (task_complete: subagent${label})`);
+            return;
           }
           const assistantStaleByInteraction =
             !lastAgentMessage
@@ -1831,6 +1913,22 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
       }
     }
 
+    async function primeSessionHeadMeta() {
+      const stat = safeStat(filePath);
+      if (!stat || stat.size <= 0) return;
+
+      const headText = readFileSliceUtf8(filePath, 0, Math.min(stat.size, 512 * 1024));
+      const lines = headText.split(/\r?\n/);
+      for (const line of lines) {
+        if (!line) continue;
+        const obj = safeJsonParse(line);
+        if (obj && obj.type === 'session_meta') {
+          await processObject(obj, { seed: true });
+          return;
+        }
+      }
+    }
+
     follower.attach(
       filePath,
       (obj, meta) => {
@@ -1844,6 +1942,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
     let seedPriming = null;
 
     async function primeFromSeedWindow(windowMs) {
+      await primeSessionHeadMeta();
       if (!windowMs || windowMs <= 0) return;
       const stat = safeStat(filePath);
       if (!stat || stat.size <= 0) return;
@@ -1867,9 +1966,13 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
 
       // Pass 2: treat recent seed lines as "live" to avoid missing quick turns.
       const since = Date.now() - Math.max(0, Number(windowMs));
+      const fileBornAt = Number.isFinite(Number(stat.birthtimeMs)) ? Number(stat.birthtimeMs) : 0;
+      const catchupFloor = fileBornAt > 0 ? Math.max(since, fileBornAt) : since;
       for (const obj of objects) {
         const ts = parseTimestamp(obj && obj.timestamp);
-        if (ts != null && ts < since) continue;
+        // Forked Codex chats copy old events into a newly created session file.
+        // Keep copied history as seed state only; replay only events born with this file.
+        if (ts == null || ts < catchupFloor) continue;
         await processObject(obj, { seed: false });
       }
     }
