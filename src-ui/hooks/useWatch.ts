@@ -1,11 +1,13 @@
 import { useState, useCallback, useRef } from 'react';
 import { sidecar, spawnSidecar } from '@/lib/sidecar';
+import { dispatchNativeNotificationLine } from '@/lib/native-notification';
 import type { Child } from '@tauri-apps/plugin-shell';
 
 export function useWatch() {
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const childRef = useRef<Child | null>(null);
+  const stdoutBufferRef = useRef('');
 
   const appendLog = useCallback((line: string) => {
     const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
@@ -15,6 +17,16 @@ export function useWatch() {
       return next.length > 500 ? next.slice(-500) : next;
     });
   }, []);
+
+  const handleStdout = useCallback((chunk: string) => {
+    const lines = `${stdoutBufferRef.current}${String(chunk || '')}`.split(/\r?\n/);
+    stdoutBufferRef.current = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      if (!dispatchNativeNotificationLine(line)) appendLog(line);
+    }
+  }, [appendLog]);
 
   const start = useCallback(
     async (opts: {
@@ -32,9 +44,10 @@ export function useWatch() {
         '--claude-quiet-ms', String(opts.claudeQuietMs ?? 60000),
       ];
       try {
+        stdoutBufferRef.current = '';
         const child = await spawnSidecar(
           args,
-          (line) => appendLog(line),
+          handleStdout,
           (line) => appendLog(`[stderr] ${line}`),
         );
         childRef.current = child;
@@ -44,7 +57,7 @@ export function useWatch() {
         appendLog(`[watch] failed to start: ${e}`);
       }
     },
-    [appendLog],
+    [appendLog, handleStdout],
   );
 
   const stop = useCallback(async () => {

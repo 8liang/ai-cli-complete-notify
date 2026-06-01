@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sidecar } from '@/lib/sidecar';
+import { filterNativeNotificationOutput } from '@/lib/native-notification';
 import type { AppConfig } from '@/lib/types';
 import Panel from './ui/Panel';
 
@@ -31,7 +32,8 @@ export default function TestPanel({ config }: Props) {
       ];
       if (useHookSimulation) args.push('--from-hook');
       const out = await sidecar(args);
-      setLog(out.stdout || out.stderr || 'Done');
+      const stdout = filterNativeNotificationOutput(out.stdout);
+      setLog(stdout || out.stderr || 'Done');
     } catch (error) {
       setLog(`Error: ${error}`);
     } finally {

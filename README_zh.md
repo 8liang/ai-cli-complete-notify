@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.6.0)
+# AI CLI Complete Notify (v2.7.0)
 
-![Version](https://img.shields.io/badge/version-2.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.7.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -78,12 +78,22 @@ cd ai-cli-complete-notify
 # 安装依赖
 npm install
 
-# 配置环境变量
+# 配置环境变量（源码开发模式）
 cp .env.example .env
 # 编辑 .env 文件，填写您的通知配置
 
 # 运行桌面应用
 npm run dev
+```
+
+macOS 打包为可双击打开的应用：
+
+```bash
+# 生成 .app
+npm run dist:mac:app
+
+# 生成 .dmg（分发给他人时使用）
+npm run dist:mac:dmg
 ```
 
 ## 🖥️ 桌面应用使用
@@ -279,6 +289,9 @@ node ai-reminder.js paths
 
 # 查看当前生效配置
 node ai-reminder.js config
+
+# 检查 .env 是否存在；缺失时生成 .env.example
+node ai-reminder.js env-status --create-example
 ```
 
 ## ⚙️ 配置说明
@@ -286,6 +299,15 @@ node ai-reminder.js config
 ### 环境变量配置（.env）
 
 从 `.env.example` 复制并填写您的配置：
+
+`.env` 放置位置：
+
+- **Windows 便携版**：放在 `ai-cli-complete-notify.exe` 同目录，和旧版本保持一致。
+- **macOS 打包版（.app / .dmg）**：放在 `~/.ai-cli-complete-notify/.env`。不要放进 `.app` 包内部，也不要依赖 `.dmg` 里的只读目录。
+- **源码开发 / CLI 模式**：可以放在项目根目录，也可以放在数据目录。
+- 可执行 `ai-reminder paths` 查看当前数据目录和推荐的 `.env` 路径；如需完全自定义，可设置 `AI_CLI_COMPLETE_NOTIFY_ENV_PATH=/path/to/.env`。
+
+macOS 桌面版首次启动会自动检查 `.env`。如果没有找到，会在数据目录创建 `.env.example` 并在界面顶部提示去配置；如果已存在 `.env`，界面会显示配置加载成功。如果在 Finder 中看不见 `.env.example`，按 `Command + Shift + .` 显示隐藏文件，再把 `.env.example` 复制为 `.env` 后填写配置。
 
 ```env
 # Webhook 配置（支持飞书/钉钉/企业微信）
@@ -357,17 +379,25 @@ npm run dev:ui
 ### 构建发布版本
 
 ```bash
-# 默认构建：Tauri 便携版
-# 产物：
+# 默认构建：按当前平台选择产物
+# Windows:
 #   dist/ai-cli-complete-notify-<版本号>-portable-win-x64/
 #   dist/ai-cli-complete-notify-<版本号>-portable-win-x64.zip
+# macOS:
+#   src-tauri/target/release/bundle/macos/ai-cli-complete-notify.app
 npm run dist
 
-# 显式构建便携版
+# Windows 便携版
 npm run dist:portable
 
-# NSIS 安装包（可选）
+# Windows NSIS 安装包（可选）
 npm run dist:installer
+
+# macOS .app
+npm run dist:mac:app
+
+# macOS .dmg（可选，用于分发）
+npm run dist:mac:dmg
 
 # 仅构建 sidecar
 npm run build:sidecar
@@ -379,6 +409,15 @@ Windows 说明：
 - 如果你仍想走批处理入口，`build-tauri.bat` 默认输出便携版。
 - 如果还需要安装包，可执行 `build-tauri.bat installer`。
 - 便携版产物默认不再携带 `README.md` 和 `README_zh.md`，只保留运行所需文件。
+
+macOS 说明：
+
+- `npm run build:sidecar` 会按当前 Mac 架构生成 Tauri sidecar，例如 Apple Silicon 为 `src-tauri/binaries/ai-reminder-aarch64-apple-darwin`。
+- `npm run dist:mac:app` 输出可直接双击运行的 `.app`。
+- `npm run dist:mac:dmg` 输出 `.dmg`，适合发布给其他用户安装。
+- 打包后的 `.app` 会通过 Tauri 原生通知插件发送桌面通知。macOS 可能只在第一次询问通知权限；允许 `ai-cli-complete-notify` 后，后续提醒不应再反复弹出 AppleScript 访问提示。
+- 日常使用建议从 `.dmg` 拖到 `/Applications` 后运行。不要长期直接从 Desktop 或 Downloads 运行 `.app`，否则 macOS 可能因为 sidecar 运行时和资源文件位于受保护目录下，反复弹出“允许访问桌面/下载”这类隐私提示。
+- 正式对外发布时，macOS 可能还需要 Apple Developer 证书签名和 notarization 公证。
 
 ## 📝 使用提示
 
@@ -399,6 +438,18 @@ Windows 说明：
 <summary>展开 / 收起版本历史</summary>
 
 > `v2.x` 是当前的 Tauri 桌面版本线，`v1.x` 为旧的 Electron 版本线。
+
+### 2.7.0
+
+- 增加 macOS 桌面端兼容支持：打包后的 `.app` 改为通过 Tauri 原生通知发送桌面通知，避免反复弹出 AppleScript 访问提示；CLI/源码运行时仍保留 `osascript display notification` 作为兜底。声音提醒支持 `say` / `beep`，自定义音频支持 `afplay`。
+- 增加 macOS Tauri sidecar 构建链路，按当前架构生成 `ai-reminder-aarch64-apple-darwin` 或 `ai-reminder-x86_64-apple-darwin`，解决 macOS 打包时 sidecar 命名不匹配的问题。
+- 新增 macOS 打包脚本：`npm run dist:mac:app` 生成可双击打开的 `.app`，`npm run dist:mac:dmg` 生成用于分发的 `.dmg`。
+- `npm run dist` 改为按当前平台选择构建产物：Windows 继续输出便携版，macOS 输出 `.app`。
+- 明确 macOS 打包版 `.env` 位置为 `~/.ai-cli-complete-notify/.env`，并在 `paths` 命令中输出推荐路径；Windows 便携版继续支持 exe 同目录 `.env`。
+- macOS 桌面版启动时会检查 `.env`：缺失时自动创建 `.env.example` 并提醒用户配置，存在时显示配置加载成功；提示中会说明 Finder 看不到隐藏文件时可按 `Command + Shift + .` 显示，再复制 `.env.example` 为 `.env`。
+- 修复桌面界面“打开配置文件”能力在非 Windows 平台不可用的问题，macOS 现在使用系统 `open` 命令打开文件。
+- 修复前端侧栏版本号仍显示旧版本的问题，版本号改为从 `package.json` 注入构建，不再手写。
+- README / README_zh 补充 macOS 构建、`.app` / `.dmg` 产物说明，以及正式分发时可能需要签名和 notarization 公证的提示。
 
 ### 2.6.0
 

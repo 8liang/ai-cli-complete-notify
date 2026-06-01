@@ -36,6 +36,11 @@ function spawnPowerShell(script) {
   return spawn(ps, ['-NoProfile', '-Command', script], { stdio: 'ignore', shell: false });
 }
 
+function spawnMacSound(command, args) {
+  if (process.platform !== 'darwin') return null;
+  return spawn(command, args, { stdio: 'ignore', shell: false });
+}
+
 function escapePsSingle(value) {
   return String(value || '').replace(/'/g, "''");
 }
@@ -70,12 +75,28 @@ function playSoundFile(filePath) {
   return spawnPowerShell(psScript);
 }
 
+function playMacBeep() {
+  return spawnMacSound('osascript', ['-e', 'beep 1']);
+}
+
+function getMacTtsProcessSpec(text) {
+  return {
+    command: 'say',
+    args: [String(text || '')]
+  };
+}
+
+function playMacSoundFile(filePath) {
+  return spawnMacSound('afplay', [filePath]);
+}
+
 function notifySound({ config, title }) {
   return new Promise((resolve) => {
     try {
       const soundCfg = config.channels && config.channels.sound ? config.channels.sound : {};
       const wsl = isWsl();
-      if (process.platform !== 'win32' && !wsl) {
+      const mac = process.platform === 'darwin';
+      if (process.platform !== 'win32' && !wsl && !mac) {
         resolve({ ok: false, error: 'sound not supported on this platform' });
         return;
       }
@@ -84,21 +105,21 @@ function notifySound({ config, title }) {
       const customPathRaw = String(soundCfg.customPath || '').trim();
       if (useCustom && customPathRaw) {
         const pathToUse = wsl ? toWindowsPath(customPathRaw) : customPathRaw;
-        const processRef = playSoundFile(pathToUse);
+        const processRef = mac ? playMacSoundFile(pathToUse) : playSoundFile(pathToUse);
         if (!processRef) {
           resolve({ ok: false, error: 'sound not supported on this platform' });
           return;
         }
         processRef.on('error', (error) => {
           if (soundCfg.fallbackBeep) {
-            const fallback = playBeep();
+            const fallback = mac ? playMacBeep() : playBeep();
             if (fallback) fallback.on('error', () => {});
           }
           resolve({ ok: false, error: error.message });
         });
         processRef.on('close', (code) => {
           if (code !== 0 && soundCfg.fallbackBeep) {
-            const fallback = playBeep();
+            const fallback = mac ? playMacBeep() : playBeep();
             if (fallback) fallback.on('error', () => {});
           }
           resolve({ ok: code === 0, error: code === 0 ? null : 'custom sound failed' });
@@ -107,7 +128,7 @@ function notifySound({ config, title }) {
       }
 
       if (!soundCfg.tts) {
-        const processRef = playBeep();
+        const processRef = mac ? playMacBeep() : playBeep();
         if (!processRef) {
           resolve({ ok: false, error: 'sound not supported on this platform' });
           return;
@@ -117,28 +138,35 @@ function notifySound({ config, title }) {
         return;
       }
 
-      const processRef = playWindowsTtsAndBeep(title);
+      const macTts = mac ? getMacTtsProcessSpec(title) : null;
+      const processRef = mac && macTts
+        ? spawnMacSound(macTts.command, macTts.args)
+        : playWindowsTtsAndBeep(title);
       if (!processRef) {
         resolve({ ok: false, error: 'sound not supported on this platform' });
         return;
       }
       processRef.on('error', () => {
         if (soundCfg.fallbackBeep) {
-          const fallback = playBeep();
+          const fallback = mac ? playMacBeep() : playBeep();
           if (fallback) fallback.on('error', () => {});
         }
         resolve({ ok: false, error: 'sound notification failed' });
       });
       processRef.on('close', (code) => {
+        if (mac && code === 0) {
+          const beep = playMacBeep();
+          if (beep) beep.on('error', () => {});
+        }
         if (code !== 0 && soundCfg.fallbackBeep) {
-          const fallback = playBeep();
+          const fallback = mac ? playMacBeep() : playBeep();
           if (fallback) fallback.on('error', () => {});
         }
         resolve({ ok: code === 0, error: code === 0 ? null : 'sound notification exited with error' });
       });
     } catch (error) {
-      if (config.channels.sound.fallbackBeep && (process.platform === 'win32' || isWsl())) {
-        const fallback = playBeep();
+      if (config.channels.sound.fallbackBeep && (process.platform === 'win32' || process.platform === 'darwin' || isWsl())) {
+        const fallback = process.platform === 'darwin' ? playMacBeep() : playBeep();
         if (fallback) fallback.on('error', () => {});
       }
       resolve({ ok: false, error: error.message });
@@ -148,5 +176,6 @@ function notifySound({ config, title }) {
 
 
 module.exports = {
+  getMacTtsProcessSpec,
   notifySound
 };

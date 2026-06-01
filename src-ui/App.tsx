@@ -8,6 +8,8 @@ import { useWatch } from '@/hooks/useWatch';
 import { useHooks } from '@/hooks/useHooks';
 import { getStartupStatus, setAutostartEnabled, type StartupStatus } from '@/lib/startup';
 import { sidecar } from '@/lib/sidecar';
+import { hideToTray } from '@/lib/window';
+import type { EnvSetupStatus } from '@/lib/types';
 import Sidebar from '@/components/Sidebar';
 import ChannelsPanel from '@/components/ChannelsPanel';
 import SoundPanel from '@/components/SoundPanel';
@@ -19,7 +21,9 @@ import SummaryPanel from '@/components/SummaryPanel';
 import AdvancedPanel from '@/components/AdvancedPanel';
 import CloseDialog from '@/components/CloseDialog';
 
-const VERSION = '2.6.0';
+declare const __APP_VERSION__: string;
+
+const VERSION = __APP_VERSION__;
 const appWindow = getCurrentWindow();
 
 export default function App() {
@@ -30,6 +34,8 @@ export default function App() {
   const [activePanel, setActivePanel] = useState('notifications');
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [startupStatus, setStartupStatus] = useState<StartupStatus | null>(null);
+  const [envStatus, setEnvStatus] = useState<EnvSetupStatus | null>(null);
+  const [showEnvBanner, setShowEnvBanner] = useState(true);
   const [showHooksBanner, setShowHooksBanner] = useState<string[] | false>(false);
   const [autostartBusy, setAutostartBusy] = useState(false);
   const didAutoStartWatchRef = useRef(false);
@@ -40,6 +46,33 @@ export default function App() {
     await appWindow.show();
     await appWindow.unminimize();
     await appWindow.setFocus();
+  }, []);
+
+  const checkEnvStatus = useCallback(async () => {
+    try {
+      const out = await sidecar(['env-status', '--create-example']);
+      const parsed = JSON.parse(out.stdout) as EnvSetupStatus;
+      setEnvStatus(parsed);
+      setShowEnvBanner(true);
+      return parsed;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const fallback: EnvSetupStatus = {
+        ok: false,
+        status: 'missing',
+        dataDir: '',
+        envPath: '',
+        loadedEnvPath: '',
+        envExists: false,
+        examplePath: '',
+        exampleExists: false,
+        exampleCreated: false,
+        error: message || 'Unknown error',
+      };
+      setEnvStatus(fallback);
+      setShowEnvBanner(true);
+      return fallback;
+    }
   }, []);
 
   const handleAutostartChange = useCallback(
@@ -85,6 +118,7 @@ export default function App() {
       const [cfg, runtimeStartupStatus] = await Promise.all([
         load(),
         getStartupStatus().catch(() => null),
+        checkEnvStatus(),
       ]);
 
       if (cancelled) return;
@@ -131,7 +165,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [hooks.refreshStatus, i18n, load, revealMainWindow, save, setConfig]);
+  }, [checkEnvStatus, hooks.refreshStatus, i18n, load, revealMainWindow, save, setConfig]);
 
   useEffect(() => {
     closeDialogOpenRef.current = showCloseDialog;
@@ -166,6 +200,22 @@ export default function App() {
 
   const handleDismissHooksBanner = useCallback(() => {
     setShowHooksBanner(false);
+  }, []);
+
+  const handleOpenEnvFolder = useCallback(() => {
+    if (!envStatus?.dataDir) return;
+    sidecar(['open-file', envStatus.dataDir]).catch((e) => console.error('open env folder failed:', e));
+  }, [envStatus]);
+
+  const handleRecheckEnv = useCallback(async () => {
+    const status = await checkEnvStatus();
+    if (status.status === 'loaded') {
+      await load();
+    }
+  }, [checkEnvStatus, load]);
+
+  const handleDismissEnvBanner = useCallback(() => {
+    setShowEnvBanner(false);
   }, []);
 
   const handleLanguageChange = useCallback(
@@ -234,6 +284,59 @@ export default function App() {
         }}
       />
       <main className="content-shell scroll-smooth">
+        {showEnvBanner && envStatus && (
+          <div
+            className={`mx-4 mt-4 flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
+              envStatus.status === 'loaded'
+                ? 'border-emerald-500/30 bg-emerald-500/10'
+                : 'border-yellow-500/30 bg-yellow-500/10'
+            }`}
+          >
+            <span className={`mt-0.5 ${envStatus.status === 'loaded' ? 'text-emerald-300' : 'text-yellow-400'}`}>
+              {envStatus.status === 'loaded' ? '✓' : '⚠'}
+            </span>
+            <span className={`flex-1 leading-relaxed ${envStatus.status === 'loaded' ? 'text-emerald-100/90' : 'text-yellow-100/90'}`}>
+              {envStatus.error
+                ? ((config.ui.language || 'zh-CN').toLowerCase().startsWith('en')
+                    ? `Failed to check .env: ${envStatus.error}`
+                    : `检查 .env 失败：${envStatus.error}`)
+                : envStatus.status === 'loaded'
+                  ? ((config.ui.language || 'zh-CN').toLowerCase().startsWith('en')
+                      ? `.env loaded successfully: ${envStatus.loadedEnvPath || envStatus.envPath}`
+                      : `.env 配置加载成功：${envStatus.loadedEnvPath || envStatus.envPath}`)
+                  : ((config.ui.language || 'zh-CN').toLowerCase().startsWith('en')
+                      ? `No .env found. Created ${envStatus.examplePath}; copy it to ${envStatus.envPath} and fill in your notification settings. On macOS, if Finder does not show .env.example, press Command+Shift+. to show hidden files.`
+                      : `未找到 .env，已创建 ${envStatus.examplePath}。请复制为 ${envStatus.envPath} 后填写通知配置。macOS 上如果 Finder 看不见 .env.example，请按 Command+Shift+. 显示隐藏文件。`)}
+            </span>
+            {envStatus.status !== 'loaded' && envStatus.dataDir && (
+              <button
+                onClick={handleOpenEnvFolder}
+                className="shrink-0 rounded-lg border border-yellow-400/30 px-2.5 py-1 text-xs text-yellow-100/90 hover:border-yellow-300/60 hover:text-yellow-50 transition-colors"
+              >
+                {(config.ui.language || 'zh-CN').toLowerCase().startsWith('en') ? 'Open folder' : '打开目录'}
+              </button>
+            )}
+            <button
+              onClick={() => void handleRecheckEnv()}
+              className={`shrink-0 rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+                envStatus.status === 'loaded'
+                  ? 'border-emerald-300/30 text-emerald-100/80 hover:border-emerald-200/60 hover:text-emerald-50'
+                  : 'border-yellow-400/30 text-yellow-100/80 hover:border-yellow-300/60 hover:text-yellow-50'
+              }`}
+            >
+              {(config.ui.language || 'zh-CN').toLowerCase().startsWith('en') ? 'Recheck' : '重新检测'}
+            </button>
+            <button
+              onClick={handleDismissEnvBanner}
+              className={`ml-1 shrink-0 transition-colors ${
+                envStatus.status === 'loaded'
+                  ? 'text-emerald-200/55 hover:text-emerald-100'
+                  : 'text-yellow-400/60 hover:text-yellow-300'
+              }`}
+              aria-label="dismiss"
+            >✕</button>
+          </div>
+        )}
         {showHooksBanner && (
           <div className="mx-4 mt-4 flex items-start gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm">
             <span className="mt-0.5 text-yellow-400">⚠</span>
@@ -300,7 +403,7 @@ export default function App() {
             }
 
             if (action === 'tray') {
-              await appWindow.hide();
+              await hideToTray();
               return;
             }
 

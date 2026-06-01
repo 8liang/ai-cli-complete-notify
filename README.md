@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.6.0)
+# AI CLI Complete Notify (v2.7.0)
 
-![Version](https://img.shields.io/badge/version-2.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.7.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -77,12 +77,22 @@ cd ai-cli-complete-notify
 # Install dependencies
 npm install
 
-# Configure environment variables
+# Configure environment variables (source/dev mode)
 cp .env.example .env
 # Edit .env file and fill in your notification configuration
 
 # Run desktop application
 npm run dev
+```
+
+Build a double-clickable macOS app:
+
+```bash
+# Build .app
+npm run dist:mac:app
+
+# Build .dmg for distribution
+npm run dist:mac:dmg
 ```
 
 ## 🖥️ Desktop Application Usage
@@ -276,6 +286,9 @@ node ai-reminder.js paths
 
 # Print the current effective runtime config
 node ai-reminder.js config
+
+# Check whether .env exists; create .env.example when missing
+node ai-reminder.js env-status --create-example
 ```
 
 ## ⚙️ Configuration
@@ -283,6 +296,15 @@ node ai-reminder.js config
 ### Environment Variables (.env)
 
 Copy from `.env.example` and fill in your configuration:
+
+Where to put `.env`:
+
+- **Windows portable build**: put it next to `ai-cli-complete-notify.exe`, same as previous versions.
+- **Packaged macOS app (.app / .dmg)**: put it at `~/.ai-cli-complete-notify/.env`. Do not put it inside the `.app` bundle, and do not rely on the read-only `.dmg` volume.
+- **Source/dev or CLI mode**: put it in the project root or in the data directory.
+- Run `ai-reminder paths` to see the current data directory and recommended `.env` path. To fully override it, set `AI_CLI_COMPLETE_NOTIFY_ENV_PATH=/path/to/.env`.
+
+On first launch, the packaged macOS app checks for `.env` automatically. If it is missing, the app creates `.env.example` in the data directory and shows a setup reminder; if `.env` exists, the app shows that the configuration loaded successfully. If Finder does not show `.env.example`, press `Command + Shift + .` to show hidden files, then copy `.env.example` to `.env` and fill in your settings.
 
 ```env
 # Webhook configuration (supports Feishu/DingTalk/WeCom)
@@ -355,17 +377,25 @@ npm run dev:ui
 ### Build Release Version
 
 ```bash
-# Default build: Tauri portable package
-# Output:
+# Default build: platform-specific output
+# Windows:
 #   dist/ai-cli-complete-notify-<version>-portable-win-x64/
 #   dist/ai-cli-complete-notify-<version>-portable-win-x64.zip
+# macOS:
+#   src-tauri/target/release/bundle/macos/ai-cli-complete-notify.app
 npm run dist
 
-# Explicit portable build
+# Windows portable build
 npm run dist:portable
 
-# NSIS installer build (optional)
+# Windows NSIS installer build (optional)
 npm run dist:installer
+
+# macOS .app
+npm run dist:mac:app
+
+# macOS .dmg (optional, for distribution)
+npm run dist:mac:dmg
 
 # Build sidecar only
 npm run build:sidecar
@@ -377,6 +407,15 @@ Windows notes:
 - If you still prefer the batch entry, `build-tauri.bat` defaults to the portable package.
 - Use `build-tauri.bat installer` if you still need the NSIS installer.
 - The portable package intentionally excludes `README.md` and `README_zh.md`; only the executables and required runtime files are shipped.
+
+macOS notes:
+
+- `npm run build:sidecar` generates the Tauri sidecar for the current Mac architecture, for example `src-tauri/binaries/ai-reminder-aarch64-apple-darwin` on Apple Silicon.
+- `npm run dist:mac:app` outputs a double-clickable `.app`.
+- `npm run dist:mac:dmg` outputs a `.dmg` for distribution.
+- The packaged `.app` sends desktop notifications through the Tauri native notification plugin. macOS may ask for notification permission once; after allowing `ai-cli-complete-notify`, regular reminders should not trigger repeated AppleScript access prompts.
+- For regular use, install the `.app` into `/Applications` from the `.dmg`. Running the app directly from Desktop or Downloads can trigger macOS "allow access to Desktop/Downloads" privacy prompts because the sidecar runtime and resources are inside the app bundle at that protected path.
+- Public macOS distribution may still require Apple Developer code signing and notarization.
 
 ## 📝 Usage Tips
 
@@ -397,6 +436,18 @@ Windows notes:
 <summary>View version history</summary>
 
 > `v2.x` is the current Tauri-based desktop line. `v1.x` was the Electron-based line.
+
+### 2.7.0
+
+- Added macOS desktop compatibility: the packaged `.app` now routes desktop notifications through Tauri native notifications to avoid repeated AppleScript access prompts, while CLI/source runs keep `osascript display notification` as a fallback. Sound alerts support `say` / `beep`, and custom audio files use `afplay`.
+- Added the macOS Tauri sidecar build path, generating `ai-reminder-aarch64-apple-darwin` or `ai-reminder-x86_64-apple-darwin` for the current architecture so packaged macOS builds can find the sidecar correctly.
+- Added macOS packaging scripts: `npm run dist:mac:app` builds a double-clickable `.app`, while `npm run dist:mac:dmg` builds a `.dmg` for distribution.
+- Changed `npm run dist` to pick the output by platform: Windows keeps the portable package flow, while macOS builds the `.app`.
+- Defined the packaged macOS `.env` location as `~/.ai-cli-complete-notify/.env` and added it to the `paths` output; Windows portable builds still support `.env` next to the exe.
+- The packaged macOS app now checks `.env` at startup: when missing it creates `.env.example` and prompts the user to configure it, including a Finder hint to press `Command + Shift + .` when hidden files are not visible; when present it shows a successful load state.
+- Fixed "open config file" behavior outside Windows; macOS now uses the system `open` command.
+- Fixed the stale frontend sidebar version by injecting the version from `package.json` at build time instead of hard-coding it.
+- Updated README / README_zh with macOS build instructions, `.app` / `.dmg` output notes, and the reminder that public macOS distribution may require code signing and notarization.
 
 ### 2.6.0
 

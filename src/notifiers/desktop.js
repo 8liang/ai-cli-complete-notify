@@ -3,6 +3,8 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
+const MACOS_DESKTOP_NOTIFICATION_PREFIX = '__AI_CLI_COMPLETE_NOTIFY_DESKTOP__';
+
 function escapeXml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -43,6 +45,20 @@ function getPopupTint(kind) {
 function parseNotifyMode(output) {
   const match = String(output || '').match(/MODE:([A-Z]+)/);
   return match ? String(match[1] || '').toLowerCase() : '';
+}
+
+function escapeAppleScriptString(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, ' ');
+}
+
+function getMacOsDesktopNotificationLine({ finalTitle, body }) {
+  return `${MACOS_DESKTOP_NOTIFICATION_PREFIX}${JSON.stringify({
+    title: String(finalTitle || 'AI CLI Complete Notify'),
+    body: String(body || ''),
+  })}`;
 }
 
 function removeIfExists(filePath) {
@@ -389,10 +405,41 @@ function notifyDesktopViaPowerShell({ finalTitle, body, timeoutMs, onClick, kind
   });
 }
 
+function notifyDesktopViaMacOs({ finalTitle, body }) {
+  return new Promise((resolve) => {
+    try {
+      if (String(process.env.AI_CLI_COMPLETE_NOTIFY_DESKTOP_STDOUT || '').trim() === '1') {
+        console.log(getMacOsDesktopNotificationLine({ finalTitle, body }));
+        resolve({ ok: true, clicked: false, mode: 'tauri', error: null });
+        return;
+      }
+
+      const title = escapeAppleScriptString(finalTitle || 'AI CLI Complete Notify');
+      const message = escapeAppleScriptString(body || '');
+      const script = `display notification "${message}" with title "${title}"`;
+      const child = spawn('osascript', ['-e', script], { stdio: 'ignore', shell: false });
+
+      child.on('error', (error) => {
+        resolve({ ok: false, clicked: false, mode: 'macos', error: error.message || 'desktop notification failed' });
+      });
+      child.on('close', (code) => {
+        resolve({
+          ok: code === 0,
+          clicked: false,
+          mode: 'macos',
+          error: code === 0 ? null : 'desktop notification exited abnormally',
+        });
+      });
+    } catch (error) {
+      resolve({ ok: false, clicked: false, mode: 'macos', error: error.message });
+    }
+  });
+}
+
 function notifyDesktopBalloon({ title, message, timeoutMs, onClick, clickHint, kind, projectName }) {
   return new Promise((resolve) => {
     try {
-      if (process.platform !== 'win32') {
+      if (process.platform !== 'win32' && process.platform !== 'darwin') {
         resolve({ ok: false, error: 'desktop notifications not supported on this platform' });
         return;
       }
@@ -403,7 +450,12 @@ function notifyDesktopBalloon({ title, message, timeoutMs, onClick, clickHint, k
       const plainHint = String(clickHint || '');
       const finalTitle = plainProject ? `${plainProject} | ${plainTitle}` : plainTitle;
       const clickLine = plainHint ? `\n${plainHint}` : '';
-      const body = `${plainMessage}${clickLine}`;
+      const body = process.platform === 'darwin' ? plainMessage : `${plainMessage}${clickLine}`;
+
+      if (process.platform === 'darwin') {
+        notifyDesktopViaMacOs({ finalTitle, body }).then(resolve);
+        return;
+      }
 
       const notifyMode = getDesktopNotifyMode();
       if (notifyMode === 'popup') {
@@ -470,6 +522,8 @@ function prewarmWpf() {
 }
 
 module.exports = {
+  MACOS_DESKTOP_NOTIFICATION_PREFIX,
+  getMacOsDesktopNotificationLine,
   notifyDesktopBalloon,
   prewarmWpf,
 };

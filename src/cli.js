@@ -5,13 +5,14 @@ const { sendNotifications } = require('./engine');
 const {
   PRODUCT_NAME,
   getDataDir,
+  getPrimaryEnvPath,
   getStatePath,
   getWatchLogsDir,
   getWatchLogPath,
   getLatestWatchLogPath
 } = require('./paths');
 const { getClaudeHookNotificationContext, getOpenCodeHookNotificationContext } = require('./hook-context');
-const { spawn } = require('child_process');
+const { exec, spawn } = require('child_process');
 const path = require('path');
 
 function toNumberOrNull(value) {
@@ -31,6 +32,7 @@ function printHelp() {
   ${invoke} run    --source claude  -- <command> [args...]
   ${invoke} watch  [--sources all] [--interval-ms 1000] [--gemini-quiet-ms 3000] [--claude-quiet-ms 60000] [--quiet]
   ${invoke} paths
+  ${invoke} env-status [--create-example]
   ${invoke} hooks  status
   ${invoke} hooks  install   --target claude|gemini|opencode
   ${invoke} hooks  uninstall --target claude|gemini|opencode
@@ -84,9 +86,7 @@ async function runCli(argv) {
       console.error(JSON.stringify({ ok: false, error: 'missing file path' }));
       return { ok: false };
     }
-    const { exec } = require('child_process');
-    const escaped = filePath.replace(/"/g, '\\"');
-    exec(`start "" "${escaped}"`);
+    openFile(filePath);
     console.log(JSON.stringify({ ok: true }));
     return { ok: true, mode: 'open-file' };
   }
@@ -106,6 +106,7 @@ async function runCli(argv) {
   if (command === 'paths') {
     const payload = {
       dataDir: getDataDir(),
+      envPath: getPrimaryEnvPath(),
       settingsPath: getConfigPath(),
       statePath: getStatePath(),
       watchLogsDir: getWatchLogsDir(),
@@ -114,6 +115,13 @@ async function runCli(argv) {
     };
     console.log(JSON.stringify(payload, null, 2));
     return { ok: true, mode: 'paths', result: payload };
+  }
+
+  if (command === 'env-status') {
+    const { getEnvSetupStatus } = require('./env-setup');
+    const status = getEnvSetupStatus({ createExample: Boolean(flags['create-example']) });
+    console.log(JSON.stringify(status, null, 2));
+    return { ok: status.ok, mode: 'env-status', result: status };
   }
 
   if (command === 'hooks') {
@@ -314,6 +322,24 @@ async function runCli(argv) {
   }
 
   return { ok: false, mode: 'unknown', error: `未知命令: ${command}` };
+}
+
+function openFile(filePath) {
+  const target = String(filePath || '');
+  if (process.platform === 'win32') {
+    const escaped = target.replace(/"/g, '\\"');
+    exec(`start "" "${escaped}"`);
+    return;
+  }
+
+  const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const child = spawn(opener, [target], {
+    detached: true,
+    stdio: 'ignore',
+    shell: false,
+  });
+  child.on('error', () => {});
+  child.unref();
 }
 
 function runChild(childArgv) {

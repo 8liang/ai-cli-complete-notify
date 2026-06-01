@@ -94,6 +94,19 @@ export interface WatchPayload {
   claudeQuietMs: number;
 }
 
+export interface EnvSetupStatus {
+  ok: boolean;
+  status: 'loaded' | 'missing';
+  dataDir: string;
+  envPath: string;
+  loadedEnvPath: string;
+  envExists: boolean;
+  examplePath: string;
+  exampleExists: boolean;
+  exampleCreated: boolean;
+  error: string;
+}
+
 export type ChannelKey = 'webhook' | 'telegram' | 'desktop' | 'sound' | 'email';
 export type SourceKey = 'claude' | 'codex' | 'opencode' | 'gemini';
 

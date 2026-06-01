@@ -20,10 +20,10 @@ function isChannelEnabled(config, channelName, sourceName) {
   const source = config.sources[sourceName];
   const channelPerSource = source && source.channels && source.channels[channelName];
   if (!channelGlobal || !channelPerSource) return false;
-  if (channelName === 'desktop' && process.platform !== 'win32') {
+  if (channelName === 'desktop' && process.platform !== 'win32' && process.platform !== 'darwin') {
     return false;
   }
-  if (channelName === 'sound' && process.platform !== 'win32') {
+  if (channelName === 'sound' && process.platform !== 'win32' && process.platform !== 'darwin') {
     const isWsl = Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP);
     if (!isWsl) return false;
   }
@@ -256,5 +256,4 @@ module.exports = {
   sendNotifications,
   shouldNotifyByDuration
 };
-
 

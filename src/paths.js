@@ -73,28 +73,55 @@ function getLatestWatchLogPath() {
   }
 }
 
+function getPrimaryEnvPath() {
+  return path.join(getDataDir(), '.env');
+}
+
+function getExecutableEnvPath() {
+  try {
+    return path.join(path.dirname(process.execPath), '.env');
+  } catch (_error) {
+    return '';
+  }
+}
+
+function isPackagedRuntime() {
+  if (process.pkg) return true;
+  if (String(process.env.AI_CLI_COMPLETE_NOTIFY_PACKAGED || '') === '1') return true;
+  if (process.platform === 'darwin' && String(process.execPath || '').includes('.app/Contents/Resources/')) {
+    return true;
+  }
+  return false;
+}
+
 function getEnvPathCandidates() {
   const candidates = [];
+  const dataEnvPath = getPrimaryEnvPath();
+  const executableEnvPath = getExecutableEnvPath();
+  const cwdEnvPath = path.join(process.cwd(), '.env');
 
-  try {
-    // Prefer next to the executable (dist 目录第一层)
-    candidates.push(path.join(path.dirname(process.execPath), '.env'));
-  } catch (error) {
-    // ignore
+  if (process.platform === 'darwin' && isPackagedRuntime()) {
+    candidates.push(dataEnvPath);
+    candidates.push(cwdEnvPath);
+    if (executableEnvPath) candidates.push(executableEnvPath);
+    return [...new Set(candidates)];
   }
 
+  if (executableEnvPath) candidates.push(executableEnvPath);
+
   // 然后尝试当前工作目录（便于 dev）
-  candidates.push(path.join(process.cwd(), '.env'));
+  candidates.push(cwdEnvPath);
 
   // 最后尝试数据目录
-  candidates.push(path.join(getDataDir(), '.env'));
+  candidates.push(dataEnvPath);
 
-  return candidates;
+  return [...new Set(candidates)];
 }
 
 module.exports = {
   PRODUCT_NAME,
   getDataDir,
+  getPrimaryEnvPath,
   getSettingsPath,
   getStatePath,
   getWatchLogsDir,

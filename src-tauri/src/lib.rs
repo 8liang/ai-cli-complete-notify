@@ -37,11 +37,26 @@ impl CloseBehavior {
 }
 
 fn restore_main_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
+
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
+}
+
+fn hide_main_window_to_tray(app: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("main") {
+        tray.set_visible(true).map_err(|error| error.to_string())?;
+    }
+
+    if let Some(win) = app.get_webview_window("main") {
+        win.hide().map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
 }
 
 fn get_data_dir() -> PathBuf {
@@ -153,6 +168,11 @@ fn set_autostart_enabled(app: tauri::AppHandle, enabled: bool) -> Result<bool, S
     autostart.is_enabled().map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn hide_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+    hide_main_window_to_tray(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -167,9 +187,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             get_startup_status,
-            set_autostart_enabled
+            set_autostart_enabled,
+            hide_to_tray
         ])
         .setup(|app| {
             let launch_state = LaunchState {
@@ -204,7 +226,6 @@ pub fn run() {
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
                         button: tauri::tray::MouseButton::Left,
-                        button_state: tauri::tray::MouseButtonState::Up,
                         ..
                     } = event
                     {
@@ -228,10 +249,7 @@ pub fn run() {
 
                 match read_close_behavior() {
                     CloseBehavior::Tray => {
-                        if let Some(tray) = window.app_handle().tray_by_id("main") {
-                            let _ = tray.set_visible(true);
-                        }
-                        let _ = window.hide();
+                        let _ = hide_main_window_to_tray(window.app_handle());
                     }
                     CloseBehavior::Exit => {
                         window.app_handle().exit(0);
@@ -242,6 +260,21 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
+                if !has_visible_windows {
+                    restore_main_window(app);
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }
