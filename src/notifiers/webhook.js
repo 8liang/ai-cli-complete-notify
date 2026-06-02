@@ -500,7 +500,7 @@ async function notifyWebhook({ config, title, contentText, projectName, timestam
   const useFeishuCard = readUseFeishuCard(channel);
   const summarySucceeded = Boolean(summaryUsed);
   const summaryText = summarySucceeded ? String(taskInfo || '').trim() : '';
-  const outputText = summarySucceeded ? '' : String(outputContent || '').trim();
+  const outputText = String(outputContent || '').trim();
 
   const results = [];
   for (const url of urls) {

@@ -978,6 +978,23 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
     return lines.join('\n').trim();
   }
 
+  function extractCodexTaskCompleteMessage(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    const candidates = [
+      payload.last_agent_message,
+      payload.last_assistant_message,
+      payload.assistant_message,
+      payload.message,
+      payload.content,
+      payload.text
+    ];
+    for (const candidate of candidates) {
+      const text = extractTextFromAny(candidate).trim();
+      if (text) return text;
+    }
+    return '';
+  }
+
   function hasOptionsInRequestPrompt(text) {
     const raw = String(text || '').trim();
     if (!raw) return false;
@@ -1681,9 +1698,7 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
           clearPendingCompletion();
 
           const completionAt = ts != null ? ts : Date.now();
-          const lastAgentMessage = obj.payload && typeof obj.payload.last_agent_message === 'string'
-            ? obj.payload.last_agent_message
-            : '';
+          const lastAgentMessage = extractCodexTaskCompleteMessage(obj.payload);
           if (lastAgentMessage) {
             state.lastAssistantText = lastAgentMessage;
             state.lastAgentContent = lastAgentMessage;
