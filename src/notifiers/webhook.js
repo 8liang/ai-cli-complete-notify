@@ -5,6 +5,7 @@ const path = require('path');
 const { exec } = require('child_process');
 
 const REQUEST_TIMEOUT_MS = 10000;
+const DEFAULT_WEBHOOK_OUTPUT_MAX_LENGTH = 3000;
 
 // Logo key map for light and dark themes.
 const LOGO_MAP = {
@@ -195,11 +196,21 @@ function readUrls(channel) {
   return urlsFromEnv.length ? urlsFromEnv : urlsFromConfig;
 }
 
-function parseEnvCardToggle(value) {
+function parseBooleanToggle(value) {
   if (value === undefined || value === null || value === '') return undefined;
   const normalized = String(value).trim().toLowerCase();
-  if (['true', '1', 'yes', 'y', 'on', 'card'].includes(normalized)) return true;
-  if (['false', '0', 'no', 'n', 'off', 'post'].includes(normalized)) return false;
+  if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
+function parseEnvCardToggle(value) {
+  const parsed = parseBooleanToggle(value);
+  if (parsed !== undefined) return parsed;
+  if (value === undefined || value === null || value === '') return undefined;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'card') return true;
+  if (normalized === 'post') return false;
   return undefined;
 }
 
@@ -212,12 +223,64 @@ function readUseFeishuCard(channel) {
   return Boolean(channel.useFeishuCard);
 }
 
+function readIncludeOutputWhenSummary(channel) {
+  const envName = channel.includeOutputWhenSummaryEnv || 'WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY';
+  const parsed = parseBooleanToggle(process.env[envName]);
+  if (parsed !== undefined) return parsed;
+  return Boolean(channel.includeOutputWhenSummary);
+}
+
+function readOutputMaxLength(channel) {
+  const envName = channel.outputMaxLengthEnv || 'WEBHOOK_OUTPUT_MAX_LENGTH';
+  const raw = process.env[envName] != null && process.env[envName] !== ''
+    ? process.env[envName]
+    : channel.outputMaxLength;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_WEBHOOK_OUTPUT_MAX_LENGTH;
+  return Math.floor(parsed);
+}
+
+function truncateOutputText(text, maxLength) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  if (raw.length <= maxLength) return raw;
+  return raw.slice(0, maxLength) + '\n\n...(内容过长已截断)';
+}
+
+function formatSummaryFailureText(summaryDiagnostics) {
+  if (!summaryDiagnostics || !summaryDiagnostics.attempted || summaryDiagnostics.used || summaryDiagnostics.skipped) return '';
+  const error = String(summaryDiagnostics.error || 'fallback');
+  const labels = {
+    timeout: '请求超时',
+    missing_api_url: '缺少 API URL',
+    missing_model: '缺少模型',
+    missing_api_key: '缺少 API Key',
+    empty_content: '摘要上下文为空',
+    invalid_request: '请求参数无效',
+    network_error: '网络错误',
+    http_error: 'HTTP 请求失败',
+    invalid_json: '响应不是合法 JSON',
+    empty_summary: '未返回摘要',
+    fallback: '摘要生成失败'
+  };
+  const label = labels[error] || error;
+  const status = summaryDiagnostics.status ? ` HTTP ${summaryDiagnostics.status}` : '';
+  return `${label}${status}，已显示原文`;
+}
+
 // Build plain text fallback content.
-function buildPlainText({ title, contentText, summaryText, outputText }) {
+function buildPlainText({ title, contentText, summaryText, outputText, summaryFailureText }) {
   const blocks = [title, contentText].filter(Boolean);
-  if (summaryText) blocks.push(`AI \u6458\u8981\uff1a${summaryText}`);
-  if (outputText) blocks.push(`输出内容：\n${outputText}`);
-  return blocks.join('\n');
+  if (summaryText) blocks.push(`**AI 摘要**\n${summaryText}`);
+  if (summaryFailureText) blocks.push(`**AI 摘要**：${summaryFailureText}`);
+  if (outputText) {
+    if (summaryText || summaryFailureText) {
+      blocks.push('---', `原文\n${outputText}`);
+    } else {
+      blocks.push(`输出内容：\n${outputText}`);
+    }
+  }
+  return blocks.join('\n\n');
 }
 
 function loadCardTemplate(templatePath) {
@@ -233,7 +296,7 @@ function loadCardTemplate(templatePath) {
 }
 
 // Build Feishu card payload.
-async function buildFeishuCard({ projectName, timestamp, durationText, sourceLabel, taskInfo, templatePath, outputContent }) {
+async function buildFeishuCard({ projectName, timestamp, durationText, sourceLabel, taskInfo, templatePath, outputContent, summaryFailureText }) {
   const template = loadCardTemplate(templatePath);
   const hasTaskInfoPlaceholder = JSON.stringify(template).includes('${TASK_INFO}');
   const trimmedOutput = String(outputContent || '').trim();
@@ -296,9 +359,6 @@ async function buildFeishuCard({ projectName, timestamp, durationText, sourceLab
   // Append output content when it exists.
   if (trimmedOutput) {
     let content = trimmedOutput;
-    if (shouldInjectSummary) {
-      content = `AI 摘要：${taskInfo}\n\n${content}`;
-    }
     console.log('[webhook] 检测到输出内容，长度:', content.length);
 
     // Limit output length to keep card size under control.
@@ -314,24 +374,43 @@ async function buildFeishuCard({ projectName, timestamp, durationText, sourceLab
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    // Insert a divider and output block.
-    const outputElement = {
-      tag: 'hr',
-      margin: '12px 0 12px 0'
-    };
+    const summaryContent = String(taskInfo || '')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const summaryFailureContent = String(summaryFailureText || '')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
 
-    const contentElement = {
-      tag: 'markdown',
-      content: `**输出内容**：\n\n${content}`,
-      text_align: 'left',
-      text_size: 'normal_v2',
-      margin: '8px 0 0 0'
-    };
-
-    // Append the extra blocks to the card body.
     if (cardWithVars.body && Array.isArray(cardWithVars.body.elements)) {
-      cardWithVars.body.elements.push(outputElement);
-      cardWithVars.body.elements.push(contentElement);
+      if (summaryContent && shouldInjectSummary) {
+        cardWithVars.body.elements.push({
+          tag: 'markdown',
+          content: `**AI 摘要**\n\n${summaryContent}`,
+          text_align: 'left',
+          text_size: 'normal_v2',
+          margin: '8px 0 0 0'
+        });
+      }
+      if (!summaryContent && summaryFailureContent) {
+        cardWithVars.body.elements.push({
+          tag: 'markdown',
+          content: `**AI 摘要**：${summaryFailureContent}`,
+          text_align: 'left',
+          text_size: 'normal_v2',
+          margin: '8px 0 0 0'
+        });
+      }
+      cardWithVars.body.elements.push({
+        tag: 'hr',
+        margin: '12px 0 12px 0'
+      });
+      cardWithVars.body.elements.push({
+        tag: 'markdown',
+        content: `${summaryContent || summaryFailureContent ? '**原文**' : '**输出内容**'}\n\n${content}`,
+        text_align: 'left',
+        text_size: 'normal_v2',
+        margin: '8px 0 0 0'
+      });
     }
   } else {
     console.log('[webhook] 未检测到输出内容');
@@ -340,11 +419,18 @@ async function buildFeishuCard({ projectName, timestamp, durationText, sourceLab
   return cardWithVars;
 }
 
-function buildFeishuPostPayload({ title, contentText, summaryText, outputText }) {
+function buildFeishuPostPayload({ title, contentText, summaryText, outputText, summaryFailureText }) {
   const blocks = [contentText];
-  if (summaryText) blocks.push(`AI \u6458\u8981\uff1a${summaryText}`);
-  if (outputText) blocks.push(`输出内容：\n${outputText}`);
-  const textBlock = blocks.filter(Boolean).join('\n');
+  if (summaryText) blocks.push(`**AI 摘要**\n${summaryText}`);
+  if (summaryFailureText) blocks.push(`**AI 摘要**：${summaryFailureText}`);
+  if (outputText) {
+    if (summaryText || summaryFailureText) {
+      blocks.push('---', `原文\n${outputText}`);
+    } else {
+      blocks.push(`输出内容：\n${outputText}`);
+    }
+  }
+  const textBlock = blocks.filter(Boolean).join('\n\n');
   return {
     msg_type: 'post',
     content: {
@@ -358,20 +444,20 @@ function buildFeishuPostPayload({ title, contentText, summaryText, outputText })
   };
 }
 
-function buildWecomPayload({ title, contentText, summaryText, outputText }) {
+function buildWecomPayload({ title, contentText, summaryText, outputText, summaryFailureText }) {
   return {
     msgtype: 'text',
     text: {
-      content: buildPlainText({ title, contentText, summaryText, outputText })
+      content: buildPlainText({ title, contentText, summaryText, outputText, summaryFailureText })
     }
   };
 }
 
-function buildDingtalkPayload({ title, contentText, summaryText, outputText }) {
+function buildDingtalkPayload({ title, contentText, summaryText, outputText, summaryFailureText }) {
   return {
     msgtype: 'text',
     text: {
-      content: buildPlainText({ title, contentText, summaryText, outputText })
+      content: buildPlainText({ title, contentText, summaryText, outputText, summaryFailureText })
     }
   };
 }
@@ -419,6 +505,7 @@ async function buildPayloadByProvider({
   title,
   contentText,
   summaryText,
+  summaryFailureText,
   outputText,
   channel
 }) {
@@ -430,23 +517,24 @@ async function buildPayloadByProvider({
         durationText,
         sourceLabel,
         taskInfo: summaryText,
+        summaryFailureText,
         templatePath: channel.cardTemplatePath,
         outputContent: outputText
       });
       return { payload: { msg_type: 'interactive', card }, format: 'feishu_card' };
     }
-    return { payload: buildFeishuPostPayload({ title, contentText, summaryText, outputText }), format: 'feishu_post' };
+    return { payload: buildFeishuPostPayload({ title, contentText, summaryText, outputText, summaryFailureText }), format: 'feishu_post' };
   }
 
   if (provider === WEBHOOK_PROVIDERS.WECOM) {
-    return { payload: buildWecomPayload({ title, contentText, summaryText, outputText }), format: 'wecom_text' };
+    return { payload: buildWecomPayload({ title, contentText, summaryText, outputText, summaryFailureText }), format: 'wecom_text' };
   }
 
   if (provider === WEBHOOK_PROVIDERS.DINGTALK) {
-    return { payload: buildDingtalkPayload({ title, contentText, summaryText, outputText }), format: 'dingtalk_text' };
+    return { payload: buildDingtalkPayload({ title, contentText, summaryText, outputText, summaryFailureText }), format: 'dingtalk_text' };
   }
 
-  return { payload: buildFeishuPostPayload({ title, contentText, summaryText, outputText }), format: 'feishu_post' };
+  return { payload: buildFeishuPostPayload({ title, contentText, summaryText, outputText, summaryFailureText }), format: 'feishu_post' };
 }
 
 function sendWebhook(url, payload, provider) {
@@ -491,20 +579,28 @@ function sendWebhook(url, payload, provider) {
   });
 }
 
-async function notifyWebhook({ config, title, contentText, projectName, timestamp, durationText, sourceLabel, taskInfo, outputContent, summaryUsed }) {
+async function notifyWebhook({ config, title, contentText, projectName, timestamp, durationText, sourceLabel, taskInfo, outputContent, summaryUsed, summaryDiagnostics }) {
   const channel = config.channels.webhook || {};
   const urls = readUrls(channel);
   if (!urls.length) return { ok: false, error: '\u672a\u914d\u7f6eWEBHOOK_URLS' };
 
   // 鍒ゆ柇鏄惁浣跨敤椋炰功鍗＄墖鏍煎紡
   const useFeishuCard = readUseFeishuCard(channel);
+  const includeOutputWhenSummary = readIncludeOutputWhenSummary(channel);
+  const outputMaxLength = readOutputMaxLength(channel);
   const summarySucceeded = Boolean(summaryUsed);
   const summaryText = summarySucceeded ? String(taskInfo || '').trim() : '';
-  const outputText = String(outputContent || '').trim();
+  const summaryFailureText = formatSummaryFailureText(summaryDiagnostics);
+  const rawOutputText = String(outputContent || '').trim();
 
   const results = [];
   for (const url of urls) {
     const provider = detectWebhookProvider(url);
+    const isFeishuCard = provider === WEBHOOK_PROVIDERS.FEISHU && useFeishuCard;
+    const shouldIncludeOutput = Boolean(rawOutputText) && (!summarySucceeded || includeOutputWhenSummary);
+    const outputText = shouldIncludeOutput
+      ? (isFeishuCard ? rawOutputText : truncateOutputText(rawOutputText, outputMaxLength))
+      : '';
     // eslint-disable-next-line no-await-in-loop
     const { payload, format } = await buildPayloadByProvider({
       provider,
@@ -516,6 +612,7 @@ async function notifyWebhook({ config, title, contentText, projectName, timestam
       title,
       contentText,
       summaryText,
+      summaryFailureText,
       outputText,
       channel
     });

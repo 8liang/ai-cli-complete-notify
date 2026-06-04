@@ -101,6 +101,10 @@ function normalizeConfig(rawConfig) {
       }
     }
 
+    if (merged.summary && Number(merged.summary.timeoutMs) === 15000) {
+      merged.summary.timeoutMs = DEFAULT_CONFIG.summary.timeoutMs;
+    }
+
     return merged;
   }
   return migrateLegacyConfig(rawConfig || {});

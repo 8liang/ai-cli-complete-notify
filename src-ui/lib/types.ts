@@ -31,6 +31,10 @@ export interface AppConfig {
       urlsEnv: string;
       useFeishuCard: boolean;
       useFeishuCardEnv: string;
+      includeOutputWhenSummary: boolean;
+      includeOutputWhenSummaryEnv: string;
+      outputMaxLength: number;
+      outputMaxLengthEnv: string;
       cardTemplatePath: string;
     };
     telegram: {

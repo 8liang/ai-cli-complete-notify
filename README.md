@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.7.0)
+# AI CLI Complete Notify (v2.8.0)
 
-![Version](https://img.shields.io/badge/version-2.7.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -311,6 +311,11 @@ On first launch, the packaged macOS app checks for `.env` automatically. If it i
 WEBHOOK_URLS=https://open.feishu.cn/open-apis/bot/v2/hook/XXXXX
 # Feishu card format (true/false). .env overrides settings.json.
 # WEBHOOK_USE_FEISHU_CARD=false
+# Webhooks send summary-only when AI summary succeeds by default.
+# Turn this on to also include the original output.
+# WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY=false
+# Max characters for original output in non-card webhooks.
+# WEBHOOK_OUTPUT_MAX_LENGTH=3000
 
 # Desktop notifications and sound
 # Used as defaults only when settings.json has not explicitly set these channel switches
@@ -337,7 +342,7 @@ TELEGRAM_CHAT_ID=your_chat_id
 # SUMMARY_API_URL=https://api.openai.com
 # SUMMARY_API_KEY=your_api_key
 # SUMMARY_MODEL=gpt-4o-mini
-# SUMMARY_TIMEOUT_MS=15000
+# SUMMARY_TIMEOUT_MS=30000
 # SUMMARY_PROMPT=You are a technical assistant. Output one short summary sentence.
 
 # Custom paths (optional)
@@ -436,6 +441,16 @@ macOS notes:
 <summary>View version history</summary>
 
 > `v2.x` is the current Tauri-based desktop line. `v1.x` was the Electron-based line.
+
+### 2.8.0
+
+- Added an AI Summary test path that sends a real test notification and reports both summary generation and notification delivery in the desktop UI.
+- Improved AI Summary setup hints: the API URL input now explains base URL, exact endpoint, and trailing slash behavior.
+- Fixed summary test JSON parsing by keeping webhook logs out of stdout, so webhook status output no longer breaks the desktop test result.
+- Increased the AI Summary default timeout to 30 seconds and migrated the old 15-second default to reduce accidental fallback on slower API responses.
+- Added success/error coloring to the AI Summary test result box.
+- Added a Webhook option to include or hide the original output when an AI summary succeeds. When included, the AI summary and original output are separated with a divider and labeled clearly. When AI summary is disabled or fails, the original output is still kept to avoid blank notifications, and failures are shown inline, for example `AI Summary: request timed out, original output is shown`.
+- Added original-output length limiting for non-card webhooks through `WEBHOOK_OUTPUT_MAX_LENGTH`.
 
 ### 2.7.0
 

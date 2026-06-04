@@ -29,6 +29,7 @@ function printHelp() {
   ${invoke} start  --source claude  --task "..."
   ${invoke} stop   --source claude  --task "..." [--force]
   ${invoke} notify --source claude  --task "..." [--duration-minutes 12] [--force] [--from-hook]
+  ${invoke} summary-test
   ${invoke} run    --source claude  -- <command> [args...]
   ${invoke} watch  [--sources all] [--interval-ms 1000] [--gemini-quiet-ms 3000] [--claude-quiet-ms 60000] [--quiet]
   ${invoke} paths
@@ -122,6 +123,80 @@ async function runCli(argv) {
     const status = getEnvSetupStatus({ createExample: Boolean(flags['create-example']) });
     console.log(JSON.stringify(status, null, 2));
     return { ok: status.ok, mode: 'env-status', result: status };
+  }
+
+  if (command === 'summary-test') {
+    const config = loadConfig();
+    const source = String(flags.source || flags.s || 'claude');
+    const { summarizeTaskDetailed } = require('./summary');
+    const result = await summarizeTaskDetailed({
+      config,
+      taskInfo: 'Summary test',
+      contentText: 'Source: Summary test',
+      summaryContext: {
+        userMessage: '测试 AI 摘要配置是否可用',
+        assistantMessage: '这是一段用于验证 AI 摘要是否真正返回内容的测试输出。'
+      }
+    });
+    const payload = { ...result };
+
+    if (flags.notify) {
+      const succeeded = Boolean(result && result.ok && result.summary);
+      const detail = [
+        result && result.error ? result.error : '',
+        result && result.status ? `HTTP ${result.status}` : '',
+        result && result.detail ? String(result.detail) : ''
+      ].filter(Boolean).join(' | ');
+      const outputContent = succeeded
+        ? `AI 摘要：${result.summary}`
+        : `未生成 AI 摘要：${detail || 'unknown'}`;
+
+      const originalLog = console.log;
+      let notification;
+      try {
+        console.log = (...args) => console.error(...args);
+        notification = await sendNotifications({
+          source,
+          taskInfo: succeeded ? 'AI 摘要测试成功' : 'AI 摘要测试失败',
+          durationMs: null,
+          cwd: process.cwd(),
+          force: true,
+          outputContent,
+          summaryContext: { assistantMessage: outputContent },
+          skipSummary: true
+        });
+      } finally {
+        console.log = originalLog;
+      }
+      const results = Array.isArray(notification && notification.results)
+        ? notification.results.map((item) => {
+          const nested = Array.isArray(item && item.results) ? item.results : [];
+          const nestedDetail = nested.map((r) => {
+            if (!r || r.ok) return '';
+            const provider = r.provider ? String(r.provider) : '';
+            const status = r.status ? `HTTP ${r.status}` : '';
+            const error = r.error ? String(r.error) : '';
+            const message = r.response && (r.response.msg || r.response.StatusMessage)
+              ? String(r.response.msg || r.response.StatusMessage)
+              : '';
+            return [provider, status, error || message].filter(Boolean).join(' ');
+          }).filter(Boolean).join(' / ');
+          return {
+            channel: item && item.channel ? item.channel : undefined,
+            ok: Boolean(item && item.ok),
+            error: item && item.error ? String(item.error) : (nestedDetail || undefined)
+          };
+        })
+        : [];
+      payload.notification = {
+        skipped: Boolean(notification && notification.skipped),
+        reason: notification && notification.reason ? String(notification.reason) : null,
+        results
+      };
+    }
+
+    console.log(JSON.stringify(payload, null, 2));
+    return { ok: true, mode: 'summary-test', result: payload };
   }
 
   if (command === 'hooks') {

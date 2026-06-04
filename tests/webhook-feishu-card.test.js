@@ -8,6 +8,7 @@ test('Feishu card keeps Codex output content in interactive payload', async (t) 
   const previousEnv = {
     WEBHOOK_USE_FEISHU_CARD: process.env.WEBHOOK_USE_FEISHU_CARD,
     WEBHOOK_FORMAT: process.env.WEBHOOK_FORMAT,
+    WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY: process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY,
   };
   let postedPayload = null;
 
@@ -20,6 +21,7 @@ test('Feishu card keeps Codex output content in interactive payload', async (t) 
   });
   delete process.env.WEBHOOK_USE_FEISHU_CARD;
   delete process.env.WEBHOOK_FORMAT;
+  delete process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY;
 
   https.request = (_options, callback) => {
     let body = '';
@@ -61,18 +63,19 @@ test('Feishu card keeps Codex output content in interactive payload', async (t) 
     taskInfo: 'Codex 完成',
     outputContent: 'Codex final answer for Feishu card',
     summaryUsed: false,
-  });
+});
 
   assert.equal(result.ok, true);
   assert.equal(postedPayload.msg_type, 'interactive');
   assert.match(JSON.stringify(postedPayload.card), /Codex final answer for Feishu card/);
 });
 
-test('Feishu card keeps original output when summary is also present', async (t) => {
+test('Feishu card hides original output by default when summary is present', async (t) => {
   const originalRequest = https.request;
   const previousEnv = {
     WEBHOOK_USE_FEISHU_CARD: process.env.WEBHOOK_USE_FEISHU_CARD,
     WEBHOOK_FORMAT: process.env.WEBHOOK_FORMAT,
+    WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY: process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY,
   };
   let postedPayload = null;
 
@@ -85,6 +88,7 @@ test('Feishu card keeps original output when summary is also present', async (t)
   });
   delete process.env.WEBHOOK_USE_FEISHU_CARD;
   delete process.env.WEBHOOK_FORMAT;
+  delete process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY;
 
   https.request = (_options, callback) => {
     let body = '';
@@ -124,12 +128,160 @@ test('Feishu card keeps original output when summary is also present', async (t)
     durationText: '1s',
     sourceLabel: 'Codex',
     taskInfo: 'brief summary',
-    outputContent: 'Full Codex answer should still be visible',
+    outputContent: 'Full Codex answer should not be visible by default',
     summaryUsed: true,
   });
 
   const cardText = JSON.stringify(postedPayload.card);
   assert.equal(result.ok, true);
   assert.match(cardText, /brief summary/);
-  assert.match(cardText, /Full Codex answer should still be visible/);
+  assert.doesNotMatch(cardText, /Full Codex answer should not be visible by default/);
+});
+
+test('Feishu card can include original output when summary output is enabled', async (t) => {
+  const originalRequest = https.request;
+  const previousEnv = {
+    WEBHOOK_USE_FEISHU_CARD: process.env.WEBHOOK_USE_FEISHU_CARD,
+    WEBHOOK_FORMAT: process.env.WEBHOOK_FORMAT,
+    WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY: process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY,
+  };
+  let postedPayload = null;
+
+  t.after(() => {
+    https.request = originalRequest;
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  delete process.env.WEBHOOK_USE_FEISHU_CARD;
+  delete process.env.WEBHOOK_FORMAT;
+  delete process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY;
+
+  https.request = (_options, callback) => {
+    let body = '';
+    const req = new EventEmitter();
+    req.write = (chunk) => {
+      body += chunk.toString();
+    };
+    req.end = () => {
+      postedPayload = JSON.parse(body);
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      callback(res);
+      res.emit('data', Buffer.from(JSON.stringify({ code: 0, msg: 'success' })));
+      res.emit('end');
+    };
+    req.setTimeout = () => {};
+    req.destroy = () => {};
+    return req;
+  };
+
+  delete require.cache[require.resolve('../src/notifiers/webhook')];
+  const { notifyWebhook } = require('../src/notifiers/webhook');
+
+  const result = await notifyWebhook({
+    config: {
+      channels: {
+        webhook: {
+          urls: ['https://open.feishu.cn/open-apis/bot/v2/hook/test'],
+          useFeishuCard: true,
+          includeOutputWhenSummary: true,
+        },
+      },
+    },
+    title: '[Codex] app: brief summary',
+    contentText: 'Completed at: 2026/6/2 10:00:00\nSource: Codex',
+    projectName: 'app',
+    timestamp: '2026/6/2 10:00:00',
+    durationText: '1s',
+    sourceLabel: 'Codex',
+    taskInfo: 'brief summary',
+    outputContent: 'Full Codex answer should be visible when enabled',
+    summaryUsed: true,
+  });
+
+  const cardText = JSON.stringify(postedPayload.card);
+  assert.equal(result.ok, true);
+  assert.match(cardText, /brief summary/);
+  assert.match(cardText, /Full Codex answer should be visible when enabled/);
+  assert.match(cardText, /\*\*AI 摘要\*\*/);
+  assert.match(cardText, /"tag":"hr"/);
+  assert.match(cardText, /\*\*原文\*\*/);
+  assert.doesNotMatch(cardText, /\*\*输出内容\*\*：\\n\\nAI 摘要：brief summary/);
+});
+
+test('Feishu card shows summary failure reason before fallback output', async (t) => {
+  const originalRequest = https.request;
+  const previousEnv = {
+    WEBHOOK_USE_FEISHU_CARD: process.env.WEBHOOK_USE_FEISHU_CARD,
+    WEBHOOK_FORMAT: process.env.WEBHOOK_FORMAT,
+    WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY: process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY,
+  };
+  let postedPayload = null;
+
+  t.after(() => {
+    https.request = originalRequest;
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  delete process.env.WEBHOOK_USE_FEISHU_CARD;
+  delete process.env.WEBHOOK_FORMAT;
+  delete process.env.WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY;
+
+  https.request = (_options, callback) => {
+    let body = '';
+    const req = new EventEmitter();
+    req.write = (chunk) => {
+      body += chunk.toString();
+    };
+    req.end = () => {
+      postedPayload = JSON.parse(body);
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      callback(res);
+      res.emit('data', Buffer.from(JSON.stringify({ code: 0, msg: 'success' })));
+      res.emit('end');
+    };
+    req.setTimeout = () => {};
+    req.destroy = () => {};
+    return req;
+  };
+
+  delete require.cache[require.resolve('../src/notifiers/webhook')];
+  const { notifyWebhook } = require('../src/notifiers/webhook');
+
+  const result = await notifyWebhook({
+    config: {
+      channels: {
+        webhook: {
+          urls: ['https://open.feishu.cn/open-apis/bot/v2/hook/test'],
+          useFeishuCard: true,
+        },
+      },
+    },
+    title: '[Codex] app: original task',
+    contentText: 'Completed at: 2026/6/2 10:00:00\nSource: Codex',
+    projectName: 'app',
+    timestamp: '2026/6/2 10:00:00',
+    durationText: '1s',
+    sourceLabel: 'Codex',
+    taskInfo: 'original task',
+    outputContent: 'Fallback output should be visible',
+    summaryUsed: false,
+    summaryDiagnostics: {
+      attempted: true,
+      used: false,
+      error: 'timeout',
+    },
+  });
+
+  const cardText = JSON.stringify(postedPayload.card);
+  assert.equal(result.ok, true);
+  assert.match(cardText, /\*\*AI 摘要\*\*：请求超时，已显示原文/);
+  assert.match(cardText, /"tag":"hr"/);
+  assert.match(cardText, /\*\*原文\*\*/);
+  assert.match(cardText, /Fallback output should be visible/);
 });

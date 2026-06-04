@@ -6,7 +6,7 @@ const { notifyTelegram } = require('./notifiers/telegram');
 const { notifySound } = require('./notifiers/sound');
 const { notifyDesktopBalloon, prewarmWpf } = require('./notifiers/desktop');
 const { notifyEmail } = require('./notifiers/email');
-const { summarizeTask } = require('./summary');
+const { summarizeTaskDetailed } = require('./summary');
 const { focusTarget } = require('./focus');
 const { checkAndRememberNotification } = require('./state');
 
@@ -49,6 +49,21 @@ function buildDesktopErrorPreview(text, fallback) {
   if (!raw) return '';
   if (raw.length <= 100) return raw;
   return `${raw.slice(0, 97).trimEnd()}...`;
+}
+
+function buildSummaryDiagnostics(result, skipped) {
+  if (skipped) {
+    return { attempted: false, used: false, skipped: true, reason: 'skipSummary' };
+  }
+  if (result && result.ok && result.summary) {
+    const diagnostics = { attempted: true, used: true };
+    if (result.status) diagnostics.status = result.status;
+    return diagnostics;
+  }
+  const diagnostics = { attempted: true, used: false };
+  if (result && result.error) diagnostics.error = String(result.error);
+  if (result && result.status) diagnostics.status = result.status;
+  return diagnostics;
 }
 
 async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNameOverride, force, summaryContext, outputContent, skipSummary, notifyKind, fromHook, dedupeKey }) {
@@ -131,8 +146,12 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
 
   // Start summary generation immediately (don't await yet)
   const summaryPromise = skipSummary
-    ? Promise.resolve('')
-    : summarizeTask({ config, taskInfo, contentText, summaryContext });
+    ? Promise.resolve(null)
+    : summarizeTaskDetailed({ config, taskInfo, contentText, summaryContext })
+      .catch((error) => ({
+        ok: false,
+        error: error && error.message ? error.message : String(error)
+      }));
 
   // Add desktop notification task immediately (uses original taskInfo, doesn't need summary)
   if (isChannelEnabled(config, 'desktop', sourceName)) {
@@ -188,8 +207,10 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
   }
 
   // Now wait for summary to complete before adding notifications that need it
-  const summary = await summaryPromise;
+  const summaryResult = await summaryPromise;
+  const summary = summaryResult && summaryResult.ok && summaryResult.summary ? summaryResult.summary : '';
   const summaryUsed = Boolean(summary);
+  const summaryDiagnostics = buildSummaryDiagnostics(summaryResult, Boolean(skipSummary));
   const effectiveTaskInfo = summary || taskInfo;
 
   const titleTaskInfo = effectiveTaskInfo;
@@ -219,7 +240,8 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
         sourceLabel,
         taskInfo: effectiveTaskInfo,
         outputContent: resolvedOutput,
-        summaryUsed
+        summaryUsed,
+        summaryDiagnostics
       })
         .then((r) => ({ channel: 'webhook', ...r }))
     );
@@ -250,11 +272,10 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
     else results.push({ channel: 'unknown', ok: false, error: item.reason ? String(item.reason) : 'unknown error' });
   }
 
-  return { skipped: false, reason: null, results };
+  return { skipped: false, reason: null, results, summary: summaryDiagnostics };
 }
 
 module.exports = {
   sendNotifications,
   shouldNotifyByDuration
 };
-

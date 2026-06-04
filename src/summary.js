@@ -1,7 +1,7 @@
 const https = require('https');
 const http = require('http');
 
-const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_TOKENS = 200;
 const DEFAULT_PROVIDER = 'openai';
 
@@ -217,7 +217,7 @@ function normalizeSummaryConfig(config) {
   const timeoutCandidate = parseEnvNumber(process.env.SUMMARY_TIMEOUT_MS) ?? summary.timeoutMs;
   const timeoutNumber = Number(timeoutCandidate);
   let timeoutMs = Number.isFinite(timeoutNumber) ? timeoutNumber : DEFAULT_TIMEOUT_MS;
-  if (timeoutMs === 1200) timeoutMs = DEFAULT_TIMEOUT_MS;
+  if (timeoutMs === 1200 || timeoutMs === 15000) timeoutMs = DEFAULT_TIMEOUT_MS;
   const prompt = readString(process.env.SUMMARY_PROMPT || summary.prompt || '');
   const maxTokens = parseEnvNumber(process.env.SUMMARY_MAX_TOKENS) ?? summary.maxTokens ?? DEFAULT_MAX_TOKENS;
 

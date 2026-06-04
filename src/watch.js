@@ -539,7 +539,15 @@ function summarizeResult(result) {
   if (result.skipped) return `skipped: ${result.reason || ''}`.trim();
   const ok = Array.isArray(result.results) ? result.results.filter((r) => r && r.ok).length : 0;
   const total = Array.isArray(result.results) ? result.results.length : 0;
-  return `sent: ${ok}/${total}`;
+  const summary = result.summary && typeof result.summary === 'object' ? result.summary : null;
+  if (!summary) return `sent: ${ok}/${total}`;
+  if (summary.used) return `sent: ${ok}/${total} summary: used`;
+  if (summary.skipped) return `sent: ${ok}/${total} summary: skipped`;
+  const detail = [
+    summary.error ? String(summary.error) : 'fallback',
+    summary.status ? `HTTP ${summary.status}` : ''
+  ].filter(Boolean).join(' ');
+  return `sent: ${ok}/${total} summary: ${detail}`;
 }
 
 async function maybeNotifyConfirm({
@@ -2596,6 +2604,6 @@ function startWatch({ sources, intervalMs, geminiQuietMs, claudeQuietMs, log, co
 }
 
 module.exports = {
-  startWatch
+  startWatch,
+  _summarizeResult: summarizeResult
 };
-

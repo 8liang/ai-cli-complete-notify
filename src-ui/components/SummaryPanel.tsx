@@ -17,11 +17,30 @@ const PROVIDERS = [
   { value: 'deepseek', key: 'summary.provider.deepseek' },
 ];
 
+interface SummaryTestPayload {
+  ok?: boolean;
+  summary?: string;
+  error?: string;
+  detail?: string;
+  status?: number;
+  notification?: {
+    skipped?: boolean;
+    reason?: string;
+    results?: Array<{
+      ok?: boolean;
+      channel?: string;
+      error?: string;
+    }>;
+  };
+}
+
 export default function SummaryPanel({ config, onUpdate }: Props) {
   const { t } = useTranslation();
   const summary = config.summary;
+  const webhook = config.channels.webhook;
   const [showKey, setShowKey] = useState(false);
   const [testResult, setTestResult] = useState('');
+  const [testResultTone, setTestResultTone] = useState<'neutral' | 'success' | 'error'>('neutral');
 
   const updateSummary = (patch: Partial<AppConfig['summary']>) => {
     onUpdate((c) => ({
@@ -30,21 +49,120 @@ export default function SummaryPanel({ config, onUpdate }: Props) {
     }));
   };
 
-  const handleTest = async () => {
-    if (!summary.apiUrl) { setTestResult(t('summary.test.missingApiUrl')); return; }
-    if (!summary.apiKey) { setTestResult(t('summary.test.missingApiKey')); return; }
-    if (!summary.model) { setTestResult(t('summary.test.missingModel')); return; }
-    setTestResult(t('summary.test.running'));
+  const updateWebhook = (patch: Partial<AppConfig['channels']['webhook']>) => {
+    onUpdate((c) => ({
+      ...c,
+      channels: {
+        ...c.channels,
+        webhook: { ...c.channels.webhook, ...patch },
+      },
+    }));
+  };
+
+  const summaryErrorLabel = (error?: string) => {
+    const keyByError: Record<string, string> = {
+      disabled: 'summary.test.disabled',
+      missing_api_url: 'summary.test.missingApiUrl',
+      missing_model: 'summary.test.missingModel',
+      missing_api_key: 'summary.test.missingApiKey',
+      empty_content: 'summary.test.emptyContent',
+      invalid_request: 'summary.test.invalidRequest',
+      timeout: 'summary.test.timeout',
+      network_error: 'summary.test.networkError',
+      http_error: 'summary.test.httpError',
+      invalid_json: 'summary.test.invalidJson',
+      empty_summary: 'summary.test.emptySummary',
+    };
+    const key = error ? keyByError[error] : '';
+    return key ? t(key) : (error || t('summary.test.unexpected'));
+  };
+
+  const formatSummaryTestResult = (payload: SummaryTestPayload) => {
+    const lines = [];
+    if (payload.ok && payload.summary) {
+      lines.push(`${t('summary.test.summaryLabel')}${payload.summary}`);
+    } else {
+      const reason = summaryErrorLabel(payload.error);
+      const detail = payload.detail ? ` (${payload.detail})` : '';
+      const status = payload.status ? ` HTTP ${payload.status}` : '';
+      lines.push(`${t('summary.test.noSummaryLabel')}${reason}${status}${detail}`);
+    }
+
+    if (payload.notification) {
+      if (payload.notification.skipped) {
+        lines.push(`${t('summary.test.notificationSkipped')}${payload.notification.reason || ''}`);
+      } else {
+        const results = Array.isArray(payload.notification.results) ? payload.notification.results : [];
+        const ok = results.filter((item) => item && item.ok).length;
+        const total = results.length;
+        if (ok > 0) {
+          lines.push(`${t('summary.test.notificationSent')}${ok}/${total}`);
+        } else {
+          const detail = results
+            .map((item) => item && item.error ? item.error : '')
+            .filter(Boolean)
+            .join(' / ');
+          lines.push(`${t('summary.test.notificationFailed')}${detail || `${ok}/${total}`}`);
+        }
+      }
+    }
+
+    return lines.join('\n');
+  };
+
+  const isSummaryTestSuccess = (payload: SummaryTestPayload) => {
+    if (!payload.ok || !payload.summary) return false;
+    if (!payload.notification) return true;
+    if (payload.notification.skipped) return false;
+    const results = Array.isArray(payload.notification.results) ? payload.notification.results : [];
+    return results.length > 0 && results.some((item) => item && item.ok);
+  };
+
+  const parseSummaryTestPayload = (raw: string) => {
     try {
-      const { sidecar } = await import('@/lib/sidecar');
-      const out = await sidecar([
-        'notify', '--source', 'claude', '--task', 'Summary test', '--force',
-      ]);
-      setTestResult(out.stdout || t('summary.test.success'));
-    } catch (e) {
-      setTestResult(`${t('summary.test.fail')}: ${e}`);
+      return JSON.parse(raw) as SummaryTestPayload;
+    } catch (_error) {
+      const start = raw.indexOf('{');
+      const end = raw.lastIndexOf('}');
+      if (start >= 0 && end > start) {
+        return JSON.parse(raw.slice(start, end + 1)) as SummaryTestPayload;
+      }
+      throw _error;
     }
   };
+
+  const setSummaryTestError = (message: string) => {
+    setTestResult(message);
+    setTestResultTone('error');
+  };
+
+  const handleTest = async () => {
+    if (!summary.apiUrl) { setSummaryTestError(t('summary.test.missingApiUrl')); return; }
+    if (!summary.apiKey) { setSummaryTestError(t('summary.test.missingApiKey')); return; }
+    if (!summary.model) { setSummaryTestError(t('summary.test.missingModel')); return; }
+    setTestResult(t('summary.test.running'));
+    setTestResultTone('neutral');
+    try {
+      const { sidecar } = await import('@/lib/sidecar');
+      const out = await sidecar(['summary-test', '--notify']);
+      const raw = String(out.stdout || '').trim();
+      if (!raw) {
+        setSummaryTestError(`${t('summary.test.fail')}: ${out.stderr || t('summary.test.emptySummary')}`);
+        return;
+      }
+      const payload = parseSummaryTestPayload(raw);
+      setTestResult(formatSummaryTestResult(payload));
+      setTestResultTone(isSummaryTestSuccess(payload) ? 'success' : 'error');
+    } catch (e) {
+      setSummaryTestError(`${t('summary.test.fail')}: ${e}`);
+    }
+  };
+
+  const testResultClass = testResultTone === 'success'
+    ? 'border-emerald-400/35 bg-emerald-500/[0.10] text-emerald-100'
+    : testResultTone === 'error'
+      ? 'border-rose-400/35 bg-rose-500/[0.10] text-rose-100'
+      : 'border-white/[0.10] bg-white/[0.04] text-muted';
 
   return (
     <Panel title={t('section.summary.title')} subtitle={t('section.summary.sub')}>
@@ -77,13 +195,18 @@ export default function SummaryPanel({ config, onUpdate }: Props) {
           {/* API URL */}
           <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-2.5 items-center">
             <label className="text-sm">{t('summary.apiUrl')}</label>
-            <input
-              type="text"
-              value={summary.apiUrl}
-              onChange={(e) => updateSummary({ apiUrl: e.target.value })}
-              placeholder="https://api.openai.com/v1/chat/completions"
-              className="w-full min-w-0 px-2.5 py-2 rounded-xl border border-white/[0.16] bg-[rgba(6,10,24,0.55)] text-[var(--text)] outline-none text-sm focus:border-[rgba(110,123,255,0.60)] focus:shadow-[0_0_0_4px_rgba(110,123,255,0.18)]"
-            />
+            <div className="min-w-0">
+              <input
+                type="text"
+                value={summary.apiUrl}
+                onChange={(e) => updateSummary({ apiUrl: e.target.value })}
+                placeholder="https://api.openai.com"
+                className="w-full min-w-0 px-2.5 py-2 rounded-xl border border-white/[0.16] bg-[rgba(6,10,24,0.55)] text-[var(--text)] outline-none text-sm focus:border-[rgba(110,123,255,0.60)] focus:shadow-[0_0_0_4px_rgba(110,123,255,0.18)]"
+              />
+              <div className="mt-1.5 text-[11px] leading-relaxed text-muted">
+                {t('summary.apiUrlRuleText')}
+              </div>
+            </div>
           </div>
 
           {/* API Key */}
@@ -138,7 +261,7 @@ export default function SummaryPanel({ config, onUpdate }: Props) {
               min={300}
               step={100}
               value={summary.timeoutMs}
-              onChange={(e) => updateSummary({ timeoutMs: Number(e.target.value) || 15000 })}
+              onChange={(e) => updateSummary({ timeoutMs: Number(e.target.value) || 30000 })}
               className="w-full min-w-0 px-2.5 py-2 rounded-xl border border-white/[0.16] bg-[rgba(6,10,24,0.55)] text-[var(--text)] outline-none text-sm"
             />
           </div>
@@ -146,7 +269,7 @@ export default function SummaryPanel({ config, onUpdate }: Props) {
           {/* Test */}
           <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-2.5 items-center">
             <label className="text-sm">{t('summary.test')}</label>
-            <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="min-w-0">
               <button
                 onClick={handleTest}
                 className="px-3 py-1.5 rounded-xl border border-white/[0.14] text-xs cursor-pointer"
@@ -157,7 +280,24 @@ export default function SummaryPanel({ config, onUpdate }: Props) {
               >
                 {t('summary.testBtn')}
               </button>
-              {testResult && <span className="text-xs text-muted">{testResult}</span>}
+              {testResult && (
+                <div className={`mt-2 max-w-full whitespace-pre-wrap break-words rounded-xl border px-2.5 py-2 text-xs leading-relaxed ${testResultClass}`}>
+                  {testResult}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-2.5 items-start">
+            <label className="text-sm pt-1">{t('summary.includeOutputWhenSummary')}</label>
+            <div className="min-w-0">
+              <Switch
+                checked={Boolean(webhook.includeOutputWhenSummary)}
+                onChange={() => updateWebhook({ includeOutputWhenSummary: !webhook.includeOutputWhenSummary })}
+              />
+              <div className="mt-1.5 text-[11px] leading-relaxed text-muted">
+                {t('summary.includeOutputWhenSummaryHint')}
+              </div>
             </div>
           </div>
 

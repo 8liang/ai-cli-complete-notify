@@ -13,7 +13,7 @@ const DEFAULT_CONFIG = {
     apiUrl: '',
     apiKey: '',
     model: '',
-    timeoutMs: 15000,
+    timeoutMs: 30000,
     maxTokens: 200,
     prompt: ''
   },
@@ -38,6 +38,10 @@ const DEFAULT_CONFIG = {
       urlsEnv: 'WEBHOOK_URLS', // 逗号分隔，可配置多个
       useFeishuCard: false, // 是否使用飞书卡片格式
       useFeishuCardEnv: 'WEBHOOK_USE_FEISHU_CARD', // .env 优先开关
+      includeOutputWhenSummary: false, // webhook 在摘要成功时是否附带原始输出
+      includeOutputWhenSummaryEnv: 'WEBHOOK_INCLUDE_OUTPUT_WHEN_SUMMARY',
+      outputMaxLength: 3000, // 非卡片 webhook 输出内容最大字符数
+      outputMaxLengthEnv: 'WEBHOOK_OUTPUT_MAX_LENGTH',
       cardTemplatePath: '' // 自定义卡片模板路径(可选)
     },
     telegram: {
