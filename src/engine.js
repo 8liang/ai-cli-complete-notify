@@ -51,7 +51,7 @@ function buildDesktopErrorPreview(text, fallback) {
   return `${raw.slice(0, 97).trimEnd()}...`;
 }
 
-async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNameOverride, force, summaryContext, outputContent, skipSummary, notifyKind, fromHook }) {
+async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNameOverride, force, summaryContext, outputContent, skipSummary, notifyKind, fromHook, dedupeKey }) {
   const config = loadConfig();
   const sourceName = source || 'claude';
   const sourceConfig = config.sources[sourceName] || config.sources.claude;
@@ -89,7 +89,8 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
   const projectName = projectNameOverride || getProjectName(cwdToUse);
   const sourceLabel = getSourceLabel(sourceName);
   const dedupeText = String(
-    outputContent
+    dedupeKey
+      || outputContent
       || (summaryContext && summaryContext.assistantMessage)
       || taskInfo
       || ''

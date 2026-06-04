@@ -127,6 +127,100 @@ test('codex watch notifies only after the parent session completes when subagent
   assert.equal(notifications[0].outputContent, 'parent done');
 });
 
+test('codex watch reads task_complete content when last_agent_message is missing', async (t) => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-reminder-codex-home-'));
+  const previousEnv = {
+    CODEX_WATCH_BACKEND: process.env.CODEX_WATCH_BACKEND,
+    CODEX_FOLLOW_TOP_N: process.env.CODEX_FOLLOW_TOP_N,
+    CODEX_SEED_CATCHUP_MS: process.env.CODEX_SEED_CATCHUP_MS,
+    CODEX_STRICT_FINAL_ANSWER: process.env.CODEX_STRICT_FINAL_ANSWER,
+    CODEX_MULTI_SESSION_COMPLETE_QUIET_MS: process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS,
+    CODEX_TUI_LOG_PATH: process.env.CODEX_TUI_LOG_PATH,
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+  };
+
+  const notifications = [];
+  const enginePath = require.resolve('../src/engine');
+  const watchPath = require.resolve('../src/watch');
+  const originalEngineCache = require.cache[enginePath];
+  const originalWatchCache = require.cache[watchPath];
+
+  function restore() {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    if (originalEngineCache) require.cache[enginePath] = originalEngineCache;
+    else delete require.cache[enginePath];
+    if (originalWatchCache) require.cache[watchPath] = originalWatchCache;
+    else delete require.cache[watchPath];
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+
+  t.after(restore);
+
+  process.env.CODEX_WATCH_BACKEND = 'sessions';
+  process.env.CODEX_FOLLOW_TOP_N = '5';
+  process.env.CODEX_SEED_CATCHUP_MS = '0';
+  process.env.CODEX_STRICT_FINAL_ANSWER = '1';
+  process.env.CODEX_MULTI_SESSION_COMPLETE_QUIET_MS = '150';
+  process.env.CODEX_TUI_LOG_PATH = path.join(tempHome, 'missing-codex-tui.log');
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+
+  require.cache[enginePath] = {
+    id: enginePath,
+    filename: enginePath,
+    loaded: true,
+    exports: {
+      sendNotifications: async (args) => {
+        notifications.push(args);
+        return { results: [{ ok: true }] };
+      },
+    },
+  };
+  delete require.cache[watchPath];
+  const { startWatch } = require('../src/watch');
+
+  const sessionDir = path.join(tempHome, '.codex', 'sessions', '2026', '06', '02');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const sessionFile = path.join(sessionDir, 'content-complete.jsonl');
+  fs.writeFileSync(sessionFile, '', 'utf8');
+
+  const logs = [];
+  const stop = startWatch({
+    sources: ['codex'],
+    intervalMs: 50,
+    log: (line) => logs.push(line),
+    confirmAlert: { enabled: false },
+  });
+  t.after(() => stop());
+
+  await sleep(650);
+
+  appendJsonl(sessionFile, [
+    { timestamp: 1, type: 'event_msg', payload: { type: 'task_started', turn_id: 'content-turn' } },
+    {
+      timestamp: 2,
+      type: 'event_msg',
+      payload: {
+        type: 'task_complete',
+        turn_id: 'content-turn',
+        content: [{ type: 'output_text', text: 'fallback complete output' }],
+      },
+    },
+  ]);
+
+  await waitFor(() => notifications.length === 1, { timeoutMs: 1500, intervalMs: 25 });
+  assert.equal(notifications[0].source, 'codex');
+  assert.equal(notifications[0].outputContent, 'fallback complete output');
+  assert.ok(
+    logs.some((line) => line.includes('sent: 1/1') && line.includes('task_complete')),
+    `expected task_complete notification log, got:\n${logs.join('\n')}`
+  );
+});
+
 test('codex watch suppresses Codex Desktop subagent completions from session metadata', async (t) => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-reminder-codex-home-'));
   const previousEnv = {
