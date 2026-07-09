@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.8.0)
+# AI CLI Complete Notify (v2.9.0)
 
-![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -57,7 +57,7 @@
 - **Hook / 插件事件** 直接利用 AI CLI 自己发出的显式生命周期事件。对 Claude Code、Gemini CLI 和 OpenCode 来说，这意味着提醒可以更接近真实完成时刻，而不是依赖静默时间去猜测。
 - **Hook** 不需要为这些工具长期常驻一个后台监听器，空闲期开销更小，也更不容易因为日志解析产生误判。
 - **Watch** 仍然是通用兜底方案。它很适合 Codex，也适合没有配置 Hook 的场景，但它必须依赖本地日志和去抖静默时间来推断一轮是否真正结束。
-- 实际上，之所以增加 Hook / 插件事件选项，主要是因为 Claude Code 的 `Stop`、Gemini CLI 的 `AfterAgent`，以及 OpenCode 的 `session.idle` / `session.error`，相比日志轮询能提供更及时、更准确的完成信号；而在当前集成里，Codex 仍以 Watch 作为主要完成提醒路径。
+- 实际上，之所以增加 Hook / 插件事件选项，主要是因为 Claude Code 的 `Stop`、Gemini CLI 的 `AfterAgent`，以及 OpenCode 的 `session.status` idle / `session.idle` / `session.error`，相比日志轮询能提供更及时、更准确的完成信号；而在当前集成里，Codex 仍以 Watch 作为主要完成提醒路径。
 
 ## 🚀 快速开始
 
@@ -238,7 +238,7 @@ node ai-reminder.js hooks uninstall --target claude
 说明：
 - Claude Code 当前使用原生 `Stop` Hook 事件。
 - Gemini CLI 当前使用原生 `AfterAgent` Hook 事件。
-- OpenCode 当前使用全局插件，监听 `session.idle` / `session.error` 事件。
+- OpenCode 当前使用全局插件，监听 `session.status` idle / `session.idle` / `session.error` 事件。
 - 当前集成下，Codex 的任务完成提醒仍主要通过 Watch 模式处理。
 
 ### 日志监听模式（推荐）
@@ -448,6 +448,13 @@ macOS 说明：
 
 > `v2.x` 是当前的 Tauri 桌面版本线，`v1.x` 为旧的 Electron 版本线。
 
+### 2.9.0
+
+- OpenCode 全局插件新增兼容 `session.status` idle 事件，同时保留 `session.idle` / `session.error` 支持。
+- OpenCode 完成提醒现在可使用最新助手回复作为任务信息，不再总是只显示通用的 `OpenCode 完成`。
+- 修复通道页切换 Gotify 开关后可能出现蓝色横向滚动条的问题。
+- 在“系统”后新增“关于项目”页面，展示项目介绍、作者微信二维码，以及支付宝 / 微信赞赏码。
+
 ### 2.8.0
 
 - 新增 AI 摘要测试链路：桌面端点击测试时会真实发送一条测试通知，并同时显示摘要生成结果和通知发送结果。
@@ -504,7 +511,7 @@ macOS 说明：
 ### 2.2.0
 
 - 新增 `OpenCode` 第四个来源，可独立设置启用状态、阈值和通道开关。
-- 新增 `hooks install --target opencode`，会在 `~/.config/opencode/plugins/` 下写入全局插件，并通过 `session.idle` / `session.error` 触发提醒。
+- 新增 `hooks install --target opencode`，会在 `~/.config/opencode/plugins/` 下写入全局插件，并通过 `session.status` idle / `session.idle` / `session.error` 触发提醒。
 - OpenCode 的完成提醒改为事件驱动，不再依赖 watch 去猜测完成时机。
 - Hooks 面板、测试面板和 CLI 已全面接入 `OpenCode`，可直接安装、查看状态和测试提醒。
 - 托盘体验补强：增加专用托盘图标，并修复部分场景下隐藏到托盘后图标不明显、窗口恢复不稳定的问题。

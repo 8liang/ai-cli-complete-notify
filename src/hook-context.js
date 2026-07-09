@@ -253,7 +253,7 @@ function getOpenCodeHookNotificationContext(hookContext, defaultTaskInfo) {
     };
   }
 
-  if (eventName !== 'session.idle') return null;
+  if (eventName !== 'session.idle' && eventName !== 'session.status') return null;
 
   return {
     taskInfo: defaultTask && defaultTask !== '任务已完成' ? defaultTask : 'OpenCode 完成',

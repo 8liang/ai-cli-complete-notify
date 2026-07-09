@@ -45,7 +45,7 @@ function printHelp() {
   - 阈值提醒建议使用 start/stop（自动计算耗时）
   - 最省事的接入方式是 run：由 ${PRODUCT_NAME} 负责计时并在命令结束后提醒
   - 交互式 / VSCode 插件场景建议使用 watch：自动监听本机日志并在每次回复完成后提醒（Claude / Codex / Gemini）
-  - hooks：Claude Code / Gemini CLI 使用原生 hooks；OpenCode 通过全局 plugin 接收 session.idle / session.error 事件
+  - hooks：Claude Code / Gemini CLI 使用原生 hooks；OpenCode 通过全局 plugin 接收 session.status idle / session.idle / session.error 事件
 
 配置:
   - settings: ${getConfigPath()}

@@ -451,7 +451,7 @@ async function buildPayload(event, context, client) {
   const eventType = getEventType(event);
   const errorMessage = getErrorMessage(event);
   const sessionId = getSessionId(event);
-  const assistantText = eventType === 'session.idle'
+  const assistantText = eventType === 'session.idle' || isSessionIdleStatus(event)
     ? await fetchLatestAssistantText(client, sessionId)
     : '';
   return {
@@ -465,13 +465,35 @@ async function buildPayload(event, context, client) {
     ),
     task_info: eventType === 'session.error'
       ? (errorMessage ? \`OpenCode 失败: \${errorMessage}\` : 'OpenCode 失败')
-      : 'OpenCode 完成',
+      : truncateAssistantText(assistantText, 40) || 'OpenCode 完成',
     session_id: sessionId,
     error_message: errorMessage,
     project_name: firstString(context.project && context.project.name),
     assistant_message: assistantText,
     output_content: eventType === 'session.error' ? errorMessage : assistantText,
   };
+}
+
+function isSessionIdleStatus(event) {
+  if (getEventType(event) !== 'session.status') return false;
+  const props = event && typeof event.properties === 'object' ? event.properties : {};
+  const status = props.status;
+  return status && typeof status === 'object' && status.type === 'idle';
+}
+
+function truncateAssistantText(text, maxWords) {
+  const value = normalizeText(text);
+  if (!value) return '';
+  const words = value.split(/\\s+/).filter(Boolean);
+  if (words.length <= maxWords) return value;
+  return \`\${words.slice(0, maxWords).join(' ')}...\`;
+}
+
+function isCompletionEvent(event) {
+  const type = getEventType(event);
+  if (type === 'session.idle') return true;
+  if (type === 'session.error') return true;
+  return isSessionIdleStatus(event);
 }
 
 function shouldSkip(payload) {
@@ -486,6 +508,7 @@ function shouldSkip(payload) {
 }
 
 async function dispatchPayload(payload) {
+  const payloadJson = JSON.stringify(payload);
   try {
     Bun.spawn({
       cmd: NOTIFY_CMD,
@@ -494,7 +517,7 @@ async function dispatchPayload(payload) {
         ...process.env,
         DESKTOP_NOTIFY_MODE: process.platform === 'win32' ? 'popup' : String(process.env.DESKTOP_NOTIFY_MODE || ''),
       },
-      stdin: new Response(JSON.stringify(payload)).body,
+      stdin: new TextEncoder().encode(payloadJson),
       stdout: 'ignore',
       stderr: 'ignore',
     });
@@ -506,8 +529,7 @@ async function dispatchPayload(payload) {
 export const AiCliCompleteNotifyPlugin = async ({ client, project, directory, worktree }) => {
   return {
     event: async ({ event }) => {
-      const eventType = getEventType(event);
-      if (eventType !== 'session.idle' && eventType !== 'session.error') return;
+      if (!isCompletionEvent(event)) return;
 
       const payload = await buildPayload(event, { project, directory, worktree }, client);
       if (shouldSkip(payload)) return;

@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.8.0)
+# AI CLI Complete Notify (v2.9.0)
 
-![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -263,6 +263,13 @@ macOS 참고:
 <summary>버전 이력 보기</summary>
 
 > `v2.x`는 현재 Tauri 기반 데스크톱 라인이고, `v1.x`는 이전 Electron 라인입니다. 전체 이전 버전 이력은 [English](README.md) 또는 [简体中文](README_zh.md)를 참고하세요.
+
+### 2.9.0
+
+- OpenCode 전역 플러그인에서 `session.status` idle 이벤트를 지원하고 기존 `session.idle` / `session.error` 호환성도 유지했습니다.
+- OpenCode 완료 알림이 최신 assistant 응답을 작업 문구로 사용할 수 있어 항상 일반적인 `OpenCode 完成`만 표시되던 상태를 개선했습니다.
+- Gotify 토글을 전환한 뒤 채널 화면에 파란 가로 스크롤바가 나타날 수 있던 문제를 수정했습니다.
+- System 뒤에 About Project 페이지를 추가해 프로젝트 소개, 작성자 WeChat QR 코드, 선택적 Alipay / WeChat 후원 코드를 보여 줍니다.
 
 ### 2.8.0
 

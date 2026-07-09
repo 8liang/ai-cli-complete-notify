@@ -19,6 +19,7 @@ import HooksPanel from '@/components/HooksPanel';
 import TestPanel from '@/components/TestPanel';
 import SummaryPanel from '@/components/SummaryPanel';
 import AdvancedPanel from '@/components/AdvancedPanel';
+import AboutProjectPanel from '@/components/AboutProjectPanel';
 import CloseDialog from '@/components/CloseDialog';
 
 declare const __APP_VERSION__: string;
@@ -384,6 +385,9 @@ export default function App() {
               autostartError={startupStatus?.autostartError || ''}
               onAutostartChange={handleAutostartChange}
             />
+          )}
+          {activePanel === 'about-project' && (
+            <AboutProjectPanel />
           )}
         </div>
       </main>

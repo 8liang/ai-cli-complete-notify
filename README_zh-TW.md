@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.8.0)
+# AI CLI Complete Notify (v2.9.0)
 
-![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -263,6 +263,13 @@ macOS 建議：
 <summary>展開 / 收合版本歷史</summary>
 
 > `v2.x` 是目前的 Tauri 桌面版本線；`v1.x` 是舊 Electron 版本線。完整舊版本歷史可參考 [English](README.md) 或 [简体中文](README_zh.md)。
+
+### 2.9.0
+
+- OpenCode 全域插件新增相容 `session.status` idle 事件，同時保留 `session.idle` / `session.error` 支援。
+- OpenCode 完成提醒現在可使用最新助手回覆作為任務資訊，不再總是只顯示通用的 `OpenCode 完成`。
+- 修復通道頁切換 Gotify 開關後可能出現藍色水平捲動條的問題。
+- 在「系統」後新增「關於項目」頁面，展示專案介紹、作者微信 QR code，以及支付寶 / 微信贊賞碼。
 
 ### 2.8.0
 

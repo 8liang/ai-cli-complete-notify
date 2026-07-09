@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.8.0)
+# AI CLI Complete Notify (v2.9.0)
 
-![Version](https://img.shields.io/badge/version-2.8.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -56,7 +56,7 @@ Benefits:
 - **Hooks / plugin events** use explicit lifecycle events emitted by the AI CLI itself. For Claude Code, Gemini CLI, and OpenCode, that means reminders can fire closer to the real finish point instead of waiting for a quiet-period guess.
 - **Hooks** do not require a long-running background watcher for those tools, which reduces idle overhead and lowers the chance of log-parsing false positives.
 - **Watch** remains the universal fallback. It works well for Codex and for cases where hooks are not configured, but it depends on local logs and debounce time to infer that a turn has ended.
-- In practice, Hooks / plugin events were added because Claude Code's `Stop`, Gemini CLI's `AfterAgent`, and OpenCode's `session.idle` / `session.error` events provide more timely and accurate completion signals than watch-based log polling. In the current integration, Codex still uses Watch as the main completion path.
+- In practice, Hooks / plugin events were added because Claude Code's `Stop`, Gemini CLI's `AfterAgent`, and OpenCode's `session.status` idle / `session.idle` / `session.error` events provide more timely and accurate completion signals than watch-based log polling. In the current integration, Codex still uses Watch as the main completion path.
 
 ## 🚀 Quick Start
 
@@ -237,7 +237,7 @@ node ai-reminder.js hooks uninstall --target claude
 Notes:
 - Claude Code currently uses the native `Stop` hook event.
 - Gemini CLI currently uses the native `AfterAgent` hook event.
-- OpenCode currently uses a global plugin and listens to `session.idle` / `session.error`.
+- OpenCode currently uses a global plugin and listens to `session.status` idle / `session.idle` / `session.error`.
 - In the current integration, Codex completion reminders are still handled mainly through Watch mode.
 
 ### Log Monitoring Mode (Recommended)
@@ -447,6 +447,13 @@ macOS notes:
 
 > `v2.x` is the current Tauri-based desktop line. `v1.x` was the Electron-based line.
 
+### 2.9.0
+
+- Added support for OpenCode `session.status` idle events in the global plugin while keeping `session.idle` / `session.error` compatibility.
+- OpenCode completion reminders can now use the latest assistant reply as the task text instead of always showing the generic `OpenCode Complete` message.
+- Fixed the channel panel horizontal overflow that could show a blue horizontal bar after toggling Gotify.
+- Added an About Project page after System with project information, author WeChat contact QR code, and optional Alipay / WeChat support codes.
+
 ### 2.8.0
 
 - Added an AI Summary test path that sends a real test notification and reports both summary generation and notification delivery in the desktop UI.
@@ -503,7 +510,7 @@ macOS notes:
 ### 2.2.0
 
 - Added `OpenCode` as a fourth source with independent enable/threshold/channel settings.
-- Added `hooks install --target opencode`, which writes a global plugin under `~/.config/opencode/plugins/` and triggers reminders from `session.idle` / `session.error`.
+- Added `hooks install --target opencode`, which writes a global plugin under `~/.config/opencode/plugins/` and triggers reminders from `session.status` idle / `session.idle` / `session.error`.
 - OpenCode completion reminders now use event callbacks instead of watch-based guessing.
 - The Hooks panel, Test panel, and CLI now fully support `OpenCode`, including install, status, and reminder testing.
 - Tray behavior was refined with dedicated tray icons and more reliable hide-to-tray visibility and window restore behavior.
