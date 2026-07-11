@@ -9,16 +9,20 @@ interface Props {
   config: AppConfig;
 }
 
-export default function TestPanel({ config: _config }: Props) {
+export default function TestPanel({ config }: Props) {
   const { t } = useTranslation();
   const [source, setSource] = useState('claude');
   const [duration, setDuration] = useState(10);
   const [task, setTask] = useState(t('test.defaultTask'));
   const [log, setLog] = useState('');
   const [sending, setSending] = useState(false);
-  // Always exercise the hook path for sources that support hooks/plugins.
-  // Hybrid mode keeps Codex on watch while Claude/Gemini/OpenCode can fire via --from-hook.
-  const useHookSimulation = source === 'opencode' || source === 'claude' || source === 'gemini';
+  // Prefer the hook path for sources that support hooks/plugins when hybrid
+  // (hooks) mode is selected. In pure watch mode, exercise the watch path so
+  // the UI can validate watch fallback for Claude/Gemini.
+  // OpenCode has no watch path, so it always simulates the plugin/hook callback.
+  const useHookSimulation =
+    source === 'opencode'
+    || (config.ui.notificationMode === 'hooks' && (source === 'claude' || source === 'gemini'));
 
   const handleSend = async () => {
     setSending(true);
