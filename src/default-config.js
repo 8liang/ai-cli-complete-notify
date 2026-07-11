@@ -29,7 +29,7 @@ const DEFAULT_CONFIG = {
     confirmAlert: {
       enabled: false
     },
-    notificationMode: 'watch' // 'watch' | 'hooks'
+    notificationMode: 'hooks' // 'hooks' (hybrid: Claude/Gemini/OpenCode hooks + Codex watch) | 'watch' (log polling for all)
   },
   channels: {
     webhook: {

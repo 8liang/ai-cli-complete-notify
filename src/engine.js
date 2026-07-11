@@ -67,6 +67,49 @@ function buildSummaryDiagnostics(result, skipped) {
   return diagnostics;
 }
 
+function isHookInstalledForSource(sourceName) {
+  // Only Claude/Gemini have installable native hooks that can replace watch.
+  // OpenCode is plugin-driven and has no watch path, so install state is unused here.
+  if (sourceName !== 'claude' && sourceName !== 'gemini') return false;
+  try {
+    const { getHookStatus } = require('./hooks');
+    const status = getHookStatus();
+    const entry = status && status[sourceName];
+    return Boolean(entry && entry.installed);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function shouldSkipByNotificationMode({ sourceName, fromHook, notificationMode }) {
+  const mode = notificationMode === 'hooks' ? 'hooks' : 'watch';
+  const hookCapable = sourceName === 'claude' || sourceName === 'gemini';
+
+  // Codex has no hooks path: always allow watch-originated notifications.
+  // OpenCode has no watch path: always allow plugin/hook-originated notifications.
+  if (sourceName === 'codex' || sourceName === 'opencode') {
+    return null;
+  }
+
+  // Hybrid behavior (default "hooks" mode):
+  // - Claude / Gemini: prefer installed hooks for real-time notify; keep watch only as fallback
+  // - Codex: watch (handled above)
+  // - OpenCode: plugin hooks (handled above)
+  //
+  // "watch" mode keeps the old all-log-polling path, but no longer blocks installed hooks
+  // when the user also wants Codex watch + Claude hooks at the same time. Cross-path
+  // duplicates are suppressed later via persistent notification dedupe.
+  if (mode === 'hooks' && !fromHook && hookCapable && isHookInstalledForSource(sourceName)) {
+    return {
+      skipped: true,
+      reason: `notificationMode is hooks; watch-originated notification skipped for ${sourceName} (hooks installed)`,
+      results: []
+    };
+  }
+
+  return null;
+}
+
 async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNameOverride, force, summaryContext, outputContent, skipSummary, notifyKind, fromHook, dedupeKey }) {
   const config = loadConfig();
   const sourceName = source || 'claude';
@@ -77,19 +120,18 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
     return { skipped: true, reason: `source ${sourceName} disabled`, results: [] };
   }
 
-  // Hooks are only supported by Claude Code and Gemini CLI.
-  // In hooks mode, keep watch-originated results as a fallback because some CLI
-  // builds may stop emitting hook events for certain responses. Cross-path
-  // duplicates are suppressed later via persistent notification dedupe.
-  const notificationMode = (config.ui && config.ui.notificationMode) || 'watch';
-  const sourceUsesHooks = sourceName === 'claude' || sourceName === 'gemini';
-  if (notificationMode === 'watch' && fromHook && sourceUsesHooks) {
-    return {
-      skipped: true,
-      reason: `notificationMode is watch; hook-originated notification skipped for ${sourceName}`,
-      results: []
-    };
-  }
+  // Hybrid routing (no global watch/hooks mutex):
+  // - Codex always uses watch (no hooks support)
+  // - OpenCode always uses plugin hooks (no watch path)
+  // - Claude/Gemini: prefer installed hooks when mode is "hooks"; keep watch as fallback
+  // - Never block Claude hooks just because Codex watch is running
+  const notificationMode = (config.ui && config.ui.notificationMode) || 'hooks';
+  const modeSkip = shouldSkipByNotificationMode({
+    sourceName,
+    fromHook: Boolean(fromHook),
+    notificationMode
+  });
+  if (modeSkip) return modeSkip;
 
   const { should, reason } = shouldNotifyByDuration({
     minDurationMinutes: sourceConfig.minDurationMinutes,
@@ -293,5 +335,6 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
 
 module.exports = {
   sendNotifications,
-  shouldNotifyByDuration
+  shouldNotifyByDuration,
+  shouldSkipByNotificationMode
 };

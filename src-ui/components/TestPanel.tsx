@@ -9,15 +9,16 @@ interface Props {
   config: AppConfig;
 }
 
-export default function TestPanel({ config }: Props) {
+export default function TestPanel({ config: _config }: Props) {
   const { t } = useTranslation();
   const [source, setSource] = useState('claude');
   const [duration, setDuration] = useState(10);
   const [task, setTask] = useState(t('test.defaultTask'));
   const [log, setLog] = useState('');
   const [sending, setSending] = useState(false);
-  const useHookSimulation =
-    source === 'opencode' || (config.ui.notificationMode === 'hooks' && (source === 'claude' || source === 'gemini'));
+  // Always exercise the hook path for sources that support hooks/plugins.
+  // Hybrid mode keeps Codex on watch while Claude/Gemini/OpenCode can fire via --from-hook.
+  const useHookSimulation = source === 'opencode' || source === 'claude' || source === 'gemini';
 
   const handleSend = async () => {
     setSending(true);
