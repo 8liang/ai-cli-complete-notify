@@ -50,7 +50,7 @@ Benefits:
 - Claude Code often splits a request into sub-tasks. To avoid spam, this tool only notifies after the whole turn completes.
 - Log monitoring relies on a quiet period to confirm completion, so notifications are not instant (default 60s with tool calls, 15s without).
 - For the fastest and cleanest alerts, prefer Hooks for Claude Code / Gemini CLI and the global plugin for OpenCode; keep Watch for Codex or as a general fallback mode.
-- Watch and Hooks **can run together**. Recommended hybrid setup: Codex uses Watch; Claude Code / Gemini / OpenCode use Hooks or plugins. If both paths fire for the same source, content-based dedupe keeps only one alert.
+- Watch and Hooks **can run together in hybrid mode**. Recommended hybrid setup: Codex uses Watch; Claude Code / Gemini / OpenCode use Hooks or plugins. If both paths fire for the same source, content-based dedupe keeps only one alert. **Watch-only** mode suppresses Claude/Gemini installed hooks so the two options stay distinct.
 
 ## Hooks vs Watch
 

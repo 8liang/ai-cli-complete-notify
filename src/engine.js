@@ -67,22 +67,30 @@ function buildSummaryDiagnostics(result, skipped) {
   return diagnostics;
 }
 
-function shouldSkipByNotificationMode({ sourceName, fromHook: _fromHook, notificationMode: _notificationMode }) {
-  // Hybrid coexistence (no global watch/hooks mutex):
-  // - Codex always uses watch (no hooks support)
-  // - OpenCode always uses plugin hooks (no watch path)
-  // - Claude / Gemini: both watch and hooks may fire; content-based dedupe
-  //   later suppresses cross-path duplicates for the same completion
-  //
-  // Never skip based on notificationMode alone:
-  // - "hooks" (hybrid, default): prefer hooks for real-time alerts, but keep
-  //   watch as a real fallback when hooks are missing or do not fire. Also
-  //   keep CLI paths (notify / stop / run) working — they do not set fromHook.
-  // - "watch": all-source log polling; installed hooks may still fire and are
-  //   not blocked, so Codex watch + Claude hooks can run together.
-  //
-  // sourceName is accepted for call-site symmetry / future per-source policy.
-  void sourceName;
+function shouldSkipByNotificationMode({ sourceName, fromHook, notificationMode }) {
+  const mode = notificationMode === 'hooks' ? 'hooks' : 'watch';
+  const hookCapable = sourceName === 'claude' || sourceName === 'gemini';
+
+  // Codex has no hooks path and always uses watch.
+  // OpenCode has no watch path and always uses plugin hooks.
+  if (sourceName === 'codex' || sourceName === 'opencode') {
+    return null;
+  }
+
+  // Watch-only mode means log polling for Claude/Gemini too: suppress their
+  // installed hooks so the mode option keeps a distinct engine meaning.
+  // Hybrid ("hooks") mode allows both paths; content-based dedupe later
+  // collapses same-completion duplicates, and watch remains a real fallback
+  // when hooks are missing or do not fire. Direct CLI notify/stop/run never
+  // set fromHook, so they stay available in either mode.
+  if (mode === 'watch' && fromHook && hookCapable) {
+    return {
+      skipped: true,
+      reason: `notificationMode is watch; hook-originated notification skipped for ${sourceName}`,
+      results: [],
+    };
+  }
+
   return null;
 }
 
@@ -96,9 +104,9 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
     return { skipped: true, reason: `source ${sourceName} disabled`, results: [] };
   }
 
-  // Hybrid routing: never treat notificationMode as a global mutex that drops
-  // watch, hooks, or direct CLI notifications. Cross-path duplicates are
-  // suppressed later via persistent notification dedupe.
+  // Hybrid ("hooks") keeps Codex on watch while Claude/Gemini/OpenCode can use
+  // hooks/plugins. Watch-only suppresses Claude/Gemini hooks so the two modes
+  // stay distinct. Cross-path duplicates still rely on content-based dedupe.
   const notificationMode = (config.ui && config.ui.notificationMode) || 'hooks';
   const modeSkip = shouldSkipByNotificationMode({
     sourceName,

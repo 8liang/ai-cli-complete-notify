@@ -264,9 +264,50 @@ function getOpenCodeHookNotificationContext(hookContext, defaultTaskInfo) {
   };
 }
 
+function getGeminiHookNotificationContext(hookContext, defaultTaskInfo) {
+  if (!hookContext || typeof hookContext !== 'object') return null;
+
+  const eventName = String(hookContext.hook_event_name || '').trim();
+  // AfterAgent is the Gemini completion hook. Accept an empty event name only
+  // when prompt_response is present so older/partial payloads still work.
+  const hasPromptResponse = Object.prototype.hasOwnProperty.call(hookContext, 'prompt_response')
+    || Object.prototype.hasOwnProperty.call(hookContext, 'output_content');
+  if (eventName && eventName !== 'AfterAgent') return null;
+  if (!eventName && !hasPromptResponse) return null;
+
+  const assistantText = normalizeText(
+    hookContext.prompt_response
+      || hookContext.output_content
+      || hookContext.response
+      || hookContext.assistant_message
+      || ''
+  );
+  const userText = normalizeText(
+    hookContext.prompt
+      || hookContext.user_message
+      || ''
+  );
+  const defaultTask = String(defaultTaskInfo || '').trim();
+
+  // Align with the Gemini watch path: task label is "Gemini 完成", and the
+  // final assistant text is used as outputContent / summaryContext so
+  // content-based dedupe can collapse hook + watch duplicates.
+  return {
+    taskInfo: defaultTask && defaultTask !== '任务已完成' ? defaultTask : 'Gemini 完成',
+    outputContent: assistantText,
+    summaryContext: {
+      userMessage: userText,
+      assistantMessage: assistantText,
+    },
+    skipSummary: !assistantText,
+    delayMs: 0,
+  };
+}
+
 module.exports = {
   extractClaudeAssistantText,
   getClaudeHookNotificationContext,
+  getGeminiHookNotificationContext,
   getOpenCodeHookNotificationContext,
   looksLikeClaudeFailure,
 };
