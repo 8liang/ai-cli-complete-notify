@@ -2365,7 +2365,8 @@ function startGeminiWatch({ intervalMs, quietPeriodMs, log, confirmDetector }) {
     lastNotifiedGeminiAt: null,
     tickRunning: false,
     pendingTimer: null,
-    lastGeminiContent: null, // 鎹曡幏gemini鐨勮緭鍑哄唴瀹?    lastUserText: '',
+    lastGeminiContent: null, // capture Gemini output content for notify/dedupe
+    lastUserText: '',
     lastGeminiText: '',
     lastConfirmKey: '',
     lastConfirmAt: 0,
@@ -2393,10 +2394,12 @@ function startGeminiWatch({ intervalMs, quietPeriodMs, log, confirmDetector }) {
       cwd: process.cwd(),
       projectNameOverride: 'Gemini',
       outputContent: geminiOutput,
-      // Share a cwd-independent key with the AfterAgent hook path so hybrid
-      // mode collapses the same completion even when process.cwd() differs
-      // from the project cwd carried by the hook payload.
-      dedupeKey: buildGeminiCompletionDedupeKey(geminiOutput) || undefined,
+      // Share a cwd-independent, session-scoped key with the AfterAgent hook
+      // path so hybrid mode collapses the same completion even when
+      // process.cwd() differs from the project cwd in the hook payload.
+      dedupeKey: buildGeminiCompletionDedupeKey(geminiOutput, {
+        currentFile: state.currentFile,
+      }) || undefined,
       summaryContext: {
         userMessage: state.lastUserText,
         assistantMessage: state.lastGeminiText
@@ -2428,6 +2431,8 @@ function startGeminiWatch({ intervalMs, quietPeriodMs, log, confirmDetector }) {
     state.lastGeminiAt = null;
     state.lastUserText = '';
     state.lastGeminiText = '';
+    // Never carry output from a previous session into the next one.
+    state.lastGeminiContent = null;
     state.lastConfirmKey = '';
     state.confirmNotifiedForTurn = false;
 
@@ -2438,6 +2443,10 @@ function startGeminiWatch({ intervalMs, quietPeriodMs, log, confirmDetector }) {
         if (m.type === 'user') {
           state.lastUserAt = ts;
           state.lastUserText = extractTextFromAny(m);
+          // A later user turn invalidates any prior assistant content seed.
+          state.lastGeminiContent = null;
+          state.lastGeminiText = '';
+          state.lastGeminiAt = null;
         }
         if (m.type === 'gemini') {
           state.lastGeminiAt = ts;
@@ -2504,6 +2513,9 @@ function startGeminiWatch({ intervalMs, quietPeriodMs, log, confirmDetector }) {
           state.lastGeminiAt = null;
           state.lastNotifiedGeminiAt = null;
           state.lastGeminiText = '';
+          // New user turn: drop previous completion content so the next notify
+          // and dedupe key cannot reuse stale output from the last round.
+          state.lastGeminiContent = null;
           state.lastConfirmKey = '';
           state.confirmNotifiedForTurn = false;
           continue;

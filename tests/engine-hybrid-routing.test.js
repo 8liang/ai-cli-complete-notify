@@ -101,6 +101,7 @@ test('Gemini AfterAgent hook context extracts final prompt_response for dedupe',
   const context = getGeminiHookNotificationContext({
     hook_event_name: 'AfterAgent',
     session_id: 'sess-1',
+    transcript_path: '/home/user/.gemini/tmp/project/chats/session-abc.json',
     cwd: '/repo',
     prompt: 'summarize the diff',
     prompt_response: 'Implemented the Gemini dedupe fix.',
@@ -113,19 +114,28 @@ test('Gemini AfterAgent hook context extracts final prompt_response for dedupe',
       userMessage: 'summarize the diff',
       assistantMessage: 'Implemented the Gemini dedupe fix.',
     },
-    dedupeKey: buildGeminiCompletionDedupeKey('Implemented the Gemini dedupe fix.'),
+    dedupeKey: buildGeminiCompletionDedupeKey('Implemented the Gemini dedupe fix.', {
+      transcriptPath: '/home/user/.gemini/tmp/project/chats/session-abc.json',
+      sessionId: 'sess-1',
+    }),
     skipSummary: false,
     delayMs: 0,
   });
+  assert.match(context.dedupeKey, /session-abc\.json/i);
 });
 
 test('Gemini hook context accepts prompt_response without event name and ignores other events', () => {
   const partial = getGeminiHookNotificationContext({
     cwd: '/repo',
+    session_id: 'partial-sess',
     prompt_response: 'Partial payload still works.',
   }, 'custom task');
   assert.equal(partial.taskInfo, 'custom task');
   assert.equal(partial.outputContent, 'Partial payload still works.');
+  assert.equal(
+    partial.dedupeKey,
+    buildGeminiCompletionDedupeKey('Partial payload still works.', { sessionId: 'partial-sess' }),
+  );
 
   assert.equal(
     getGeminiHookNotificationContext({
@@ -134,6 +144,24 @@ test('Gemini hook context accepts prompt_response without event name and ignores
     }, '任务已完成'),
     null,
   );
+});
+
+test('Gemini dedupe key scopes identical outputs by session/transcript', () => {
+  const text = 'Done.';
+  const projectA = buildGeminiCompletionDedupeKey(text, {
+    transcriptPath: 'C:/Users/a/.gemini/tmp/projA/chats/session-a.json',
+  });
+  const projectB = buildGeminiCompletionDedupeKey(text, {
+    currentFile: 'C:/Users/a/.gemini/tmp/projB/chats/session-b.json',
+  });
+  const sameAsAViaWatch = buildGeminiCompletionDedupeKey(text, {
+    currentFile: '/home/user/.gemini/tmp/projA/chats/session-a.json',
+  });
+
+  assert.notEqual(projectA, projectB);
+  assert.equal(projectA, sameAsAViaWatch);
+  assert.match(projectA, /session-a\.json/i);
+  assert.match(projectB, /session-b\.json/i);
 });
 
 test('sendNotifications allows Claude hooks only outside watch-only mode', async () => {
@@ -426,10 +454,12 @@ test('Gemini hook and watch share content-based dedupe key across cwd mismatch',
   try {
     const { sendNotifications } = require('../src/engine');
     const finalOutput = 'Implemented the Gemini dedupe fix.';
-    const sharedKey = buildGeminiCompletionDedupeKey(finalOutput);
+    const sessionFile = '/home/user/.gemini/tmp/repo/chats/session-1.json';
+    const sharedKey = buildGeminiCompletionDedupeKey(finalOutput, { currentFile: sessionFile });
     const hookContext = getGeminiHookNotificationContext({
       hook_event_name: 'AfterAgent',
       session_id: 'sess-1',
+      transcript_path: sessionFile,
       cwd: '/project/repo',
       prompt: 'fix gemini dedupe',
       prompt_response: finalOutput,
@@ -464,7 +494,7 @@ test('Gemini hook and watch share content-based dedupe key across cwd mismatch',
       fromHook: false,
       skipSummary: true,
       outputContent: finalOutput,
-      dedupeKey: buildGeminiCompletionDedupeKey(finalOutput),
+      dedupeKey: buildGeminiCompletionDedupeKey(finalOutput, { currentFile: sessionFile }),
       summaryContext: {
         userMessage: 'fix gemini dedupe',
         assistantMessage: finalOutput,
@@ -475,6 +505,24 @@ test('Gemini hook and watch share content-based dedupe key across cwd mismatch',
     assert.equal(calls.length, 1);
     assert.equal(remembered.length, 1);
     assert.equal(remembered[0], `gemini::::${sharedKey.toLowerCase()}`);
+
+    // Different session with identical output must still notify.
+    const otherSessionResult = await sendNotifications({
+      source: 'gemini',
+      taskInfo: 'Gemini 完成',
+      durationMs: 1000,
+      cwd: '/project/other',
+      force: true,
+      fromHook: true,
+      skipSummary: true,
+      outputContent: finalOutput,
+      dedupeKey: buildGeminiCompletionDedupeKey(finalOutput, {
+        currentFile: '/home/user/.gemini/tmp/other/chats/session-2.json',
+      }),
+    });
+    assert.equal(otherSessionResult.skipped, false);
+    assert.equal(calls.length, 2);
+    assert.equal(remembered.length, 2);
   } finally {
     if (originalEngine) require.cache[enginePath] = originalEngine;
     else delete require.cache[enginePath];
