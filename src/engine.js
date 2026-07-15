@@ -94,7 +94,7 @@ function shouldSkipByNotificationMode({ sourceName, fromHook, notificationMode }
   return null;
 }
 
-async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNameOverride, force, summaryContext, outputContent, skipSummary, notifyKind, fromHook, dedupeKey }) {
+async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNameOverride, force, summaryContext, outputContent, skipSummary, notifyKind, fromHook, dedupeKey, skipDedupe }) {
   const config = loadConfig();
   const sourceName = source || 'claude';
   const sourceConfig = config.sources[sourceName] || config.sources.claude;
@@ -137,7 +137,7 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
       || ''
   ).trim();
 
-  if (dedupeText) {
+  if (!skipDedupe && dedupeText) {
     const duplicated = checkAndRememberNotification({
       source: sourceName,
       // Explicit dedupe keys are content-scoped (e.g. Gemini hook/watch) and

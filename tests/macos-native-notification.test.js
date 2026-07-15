@@ -50,3 +50,11 @@ test('Tauri UI dispatches native notifications and filters marker lines from log
   assert.match(rustSource, /tauri_plugin_notification::init\(\)/);
   assert.match(capabilitySource, /notification:default/);
 });
+
+test('test notifications use direct notify, bypass dedupe, and show channel diagnostics', () => {
+  const testPanelSource = fs.readFileSync(path.join(root, 'src-ui', 'components', 'TestPanel.tsx'), 'utf8');
+
+  assert.match(testPanelSource, /'--skip-dedupe'/);
+  assert.doesNotMatch(testPanelSource, /'--from-hook'/);
+  assert.match(testPanelSource, /\[stdout, stderr\]/);
+});

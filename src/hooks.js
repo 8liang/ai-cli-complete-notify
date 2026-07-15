@@ -246,8 +246,30 @@ function isOurGeminiHook(hook) {
 function buildGeminiHooks(exePath) {
   const cmd = buildNotifyCommand(exePath, 'gemini');
   return [
-    { type: 'command', command: cmd }
+    {
+      hooks: [
+        { type: 'command', command: cmd }
+      ]
+    }
   ];
+}
+
+function removeOurGeminiHooks(definitions) {
+  return definitions
+    .map((definition) => {
+      if (isOurGeminiHook(definition)) return null;
+      if (!definition || typeof definition !== 'object' || !Array.isArray(definition.hooks)) {
+        return definition;
+      }
+
+      const hasOurHook = definition.hooks.some((hook) => isOurGeminiHook(hook));
+      if (!hasOurHook) return definition;
+
+      const remainingHooks = definition.hooks.filter((hook) => !isOurGeminiHook(hook));
+      if (remainingHooks.length === 0) return null;
+      return { ...definition, hooks: remainingHooks };
+    })
+    .filter(Boolean);
 }
 
 function installGeminiHook(exePath) {
@@ -262,15 +284,8 @@ function installGeminiHook(exePath) {
     settings.hooks.AfterAgent = [];
   }
 
-  const desiredHooks = buildGeminiHooks(exePath);
-  for (const desired of desiredHooks) {
-    const idx = settings.hooks.AfterAgent.findIndex((hook) => isOurGeminiHook(hook));
-    if (idx >= 0) {
-      settings.hooks.AfterAgent[idx] = desired;
-    } else {
-      settings.hooks.AfterAgent.push(desired);
-    }
-  }
+  const existingHooks = removeOurGeminiHooks(settings.hooks.AfterAgent);
+  settings.hooks.AfterAgent = [...existingHooks, ...buildGeminiHooks(exePath)];
 
   writeJsonFile(settingsPath, settings);
   return { ok: true, settingsPath };
@@ -283,7 +298,7 @@ function uninstallGeminiHook() {
   if (!settings.hooks || typeof settings.hooks !== 'object') return { ok: true, settingsPath };
 
   if (Array.isArray(settings.hooks.AfterAgent)) {
-    settings.hooks.AfterAgent = settings.hooks.AfterAgent.filter((hook) => !isOurGeminiHook(hook));
+    settings.hooks.AfterAgent = removeOurGeminiHooks(settings.hooks.AfterAgent);
     if (settings.hooks.AfterAgent.length === 0) {
       delete settings.hooks.AfterAgent;
     }
@@ -302,7 +317,9 @@ function getGeminiHookStatus() {
   const settings = readJsonFile(settingsPath);
   const hooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {};
   const list = Array.isArray(hooks.AfterAgent) ? hooks.AfterAgent : [];
-  const installed = list.some((hook) => isOurGeminiHook(hook));
+  const installed = list.some((definition) =>
+    extractHookCommands(definition).some((hook) => isOurGeminiHook(hook))
+  );
   return { installed, settingsPath };
 }
 

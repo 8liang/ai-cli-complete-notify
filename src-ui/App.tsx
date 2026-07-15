@@ -369,7 +369,7 @@ export default function App() {
                 setShowHooksBanner(uninstalled.length > 0 ? uninstalled : false);
               }} />
               <WatchPanel config={config} onUpdate={update} watch={watch} />
-              <TestPanel config={config} />
+              <TestPanel />
             </>
           )}
           {activePanel === 'summary' && (

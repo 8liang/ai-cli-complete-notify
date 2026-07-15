@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.9.0)
+# AI CLI Complete Notify (v2.10.0)
 
-![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.10.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -263,6 +263,16 @@ macOS 참고:
 <summary>버전 이력 보기</summary>
 
 > `v2.x`는 현재 Tauri 기반 데스크톱 라인이고, `v1.x`는 이전 Electron 라인입니다. 전체 이전 버전 이력은 [English](README.md) 또는 [简体中文](README_zh.md)를 참고하세요.
+
+### 2.10.0
+
+- 하이브리드 라우팅을 개선해 Claude와 Gemini Hook이 Watch 폴백과 함께 동작하도록 했습니다. Codex는 Watch를, OpenCode는 플러그인을 계속 사용합니다.
+- 작업 디렉터리가 다른 경우에도 Gemini Hook/Watch 중복 제거가 동작하도록 개선하고, 동일한 출력을 세션별로 구분합니다.
+- 새 사용자 턴이 시작되거나 활성 세션 파일이 바뀔 때 Gemini Watch의 이전 출력을 초기화해 오래된 내용이 전송되지 않도록 했습니다.
+- Gemini Hook stdout이 항상 유효한 JSON을 반환하도록 수정하고 알림 진단 로그를 stderr로 보냅니다.
+- Gemini CLI 0.49+의 `AfterAgent` Hook 설치를 필수 중첩 구조로 수정했습니다. 기존 평면 설정은 자동 마이그레이션되고 다른 Hook은 유지되며, 상태 확인과 제거도 유효한 구조를 오탐 없이 인식합니다.
+- 수동 테스트 알림이 중복 제거를 우회하고 Gemini Hook의 `{}` 응답 대신 채널별 실제 성공 또는 실패 결과를 표시하도록 수정했습니다.
+- 일반 CLI 알림과 다른 소스의 기존 출력 동작은 유지됩니다.
 
 ### 2.9.0
 

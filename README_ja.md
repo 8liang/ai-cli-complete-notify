@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.9.0)
+# AI CLI Complete Notify (v2.10.0)
 
-![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.10.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -263,6 +263,16 @@ macOS の注意:
 <summary>バージョン履歴を表示</summary>
 
 > `v2.x` は現在の Tauri ベースのデスクトップラインで、`v1.x` は旧 Electron ラインです。過去の完全な履歴は [English](README.md) または [简体中文](README_zh.md) を参照してください。
+
+### 2.10.0
+
+- ハイブリッドルーティングを改善し、Claude と Gemini の Hook を Watch フォールバックと併用できるようにしました。Codex は Watch、OpenCode はプラグインを引き続き使用します。
+- 作業ディレクトリが異なる場合の Gemini Hook/Watch 重複排除を改善し、同じ出力をセッション単位で区別するようにしました。
+- 新しいユーザーターンの開始時やアクティブなセッションファイルの切り替え時に、Gemini Watch の古い出力をリセットするようにしました。
+- Gemini Hook の stdout を常に有効な JSON にし、通知の診断ログを stderr へ送るよう修正しました。
+- Gemini CLI 0.49+ の `AfterAgent` Hook インストールを必須のネスト構造へ修正しました。旧フラット設定は自動移行し、他の Hook は保持され、状態確認とアンインストールも有効な構造を誤判定なく認識します。
+- 手動テスト通知が重複排除を回避し、Gemini Hook の `{}` 応答ではなく各チャンネルの実際の成功・失敗結果を表示するよう修正しました。
+- 通常の CLI 通知と他のソースの既存出力動作は変更していません。
 
 ### 2.9.0
 

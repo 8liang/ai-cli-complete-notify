@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.9.0)
+# AI CLI Complete Notify (v2.10.0)
 
-![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.10.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -263,6 +263,16 @@ macOS 建議：
 <summary>展開 / 收合版本歷史</summary>
 
 > `v2.x` 是目前的 Tauri 桌面版本線；`v1.x` 是舊 Electron 版本線。完整舊版本歷史可參考 [English](README.md) 或 [简体中文](README_zh.md)。
+
+### 2.10.0
+
+- 優化混合路由：Claude 和 Gemini Hook 可與 Watch 備援同時執行，Codex 繼續使用 Watch，OpenCode 繼續使用插件。
+- 優化 Gemini Hook/Watch 跨工作目錄去重，並依工作階段區分內容相同的完成通知。
+- Gemini Watch 在新一輪使用者輸入或活動工作階段檔案切換時會清理舊輸出，避免傳送過期內容。
+- 修復 Gemini Hook stdout 輸出協議，確保始終回傳合法 JSON，並將通知診斷資訊轉到 stderr。
+- 修復 Gemini CLI 0.49+ `AfterAgent` Hook 安裝格式，改用官方要求的巢狀結構；舊扁平設定會自動遷移，其他 Hook 維持不變，狀態檢測與解除安裝也能正確識別新結構，不再出現誤判。
+- 修復手動測試提醒：測試請求會略過去重，並顯示各通道的真實成功或失敗結果，不再顯示 Gemini Hook 的 `{}` 回應。
+- 一般 CLI 通知和其他來源繼續維持原有輸出行為。
 
 ### 2.9.0
 

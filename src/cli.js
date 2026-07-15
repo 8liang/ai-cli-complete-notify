@@ -325,55 +325,69 @@ async function runCli(argv) {
 
   if (command === 'notify') {
     const fromHook = Boolean(flags['from-hook']);
+    const isGeminiHook = fromHook && source === 'gemini';
+    const originalLog = console.log;
     const durationMinutes = toNumberOrNull(flags['duration-minutes']);
     const durationMs = durationMinutes != null ? durationMinutes * 60 * 1000 : toNumberOrNull(flags['duration-ms']);
 
-    let hookContext = null;
-    if (fromHook) {
-      const { readStdinJson } = require('./hooks-stdin');
-      hookContext = await readStdinJson();
+    if (isGeminiHook) {
+      console.log = (...args) => console.error(...args);
     }
 
-    const effectiveCwd = (hookContext && hookContext.cwd) || cwd;
-    const effectiveTask = (hookContext && hookContext.task_info) || taskInfo;
-    const hookNotificationContext =
-      fromHook && source === 'claude'
-        ? getClaudeHookNotificationContext(hookContext, effectiveTask)
-        : fromHook && source === 'gemini'
-          ? getGeminiHookNotificationContext(hookContext, effectiveTask)
-          : fromHook && source === 'opencode'
-            ? getOpenCodeHookNotificationContext(hookContext, effectiveTask)
-            : null;
+    try {
+      let hookContext = null;
+      if (fromHook) {
+        const { readStdinJson } = require('./hooks-stdin');
+        hookContext = await readStdinJson();
+      }
 
-    if (hookNotificationContext && hookNotificationContext.skip) {
-      const skipped = {
-        skipped: true,
-        reason: hookNotificationContext.reason || 'hook notification skipped',
-        results: []
-      };
-      printResult(skipped);
-      return { ok: true, mode: 'notify', result: skipped };
+      const effectiveCwd = (hookContext && hookContext.cwd) || cwd;
+      const effectiveTask = (hookContext && hookContext.task_info) || taskInfo;
+      const hookNotificationContext =
+        fromHook && source === 'claude'
+          ? getClaudeHookNotificationContext(hookContext, effectiveTask)
+          : fromHook && source === 'gemini'
+            ? getGeminiHookNotificationContext(hookContext, effectiveTask)
+            : fromHook && source === 'opencode'
+              ? getOpenCodeHookNotificationContext(hookContext, effectiveTask)
+              : null;
+
+      if (hookNotificationContext && hookNotificationContext.skip) {
+        const skipped = {
+          skipped: true,
+          reason: hookNotificationContext.reason || 'hook notification skipped',
+          results: []
+        };
+        printResult(skipped);
+        return { ok: true, mode: 'notify', result: skipped };
+      }
+
+      if (hookNotificationContext && hookNotificationContext.delayMs > 0) {
+        await sleep(hookNotificationContext.delayMs);
+      }
+
+      const result = await sendNotifications({
+        source,
+        taskInfo: hookNotificationContext?.taskInfo || effectiveTask,
+        durationMs,
+        cwd: effectiveCwd,
+        force: Boolean(flags.force),
+        fromHook,
+        outputContent: hookNotificationContext?.outputContent,
+        summaryContext: hookNotificationContext?.summaryContext,
+        skipSummary: Boolean(hookNotificationContext?.skipSummary),
+        notifyKind: hookNotificationContext?.notifyKind,
+        dedupeKey: hookNotificationContext?.dedupeKey,
+        skipDedupe: Boolean(flags['skip-dedupe']),
+      });
+      printResult(result);
+      return { ok: true, mode: 'notify', result };
+    } finally {
+      if (isGeminiHook) {
+        console.log = originalLog;
+        originalLog('{}');
+      }
     }
-
-    if (hookNotificationContext && hookNotificationContext.delayMs > 0) {
-      await sleep(hookNotificationContext.delayMs);
-    }
-
-    const result = await sendNotifications({
-      source,
-      taskInfo: hookNotificationContext?.taskInfo || effectiveTask,
-      durationMs,
-      cwd: effectiveCwd,
-      force: Boolean(flags.force),
-      fromHook,
-      outputContent: hookNotificationContext?.outputContent,
-      summaryContext: hookNotificationContext?.summaryContext,
-      skipSummary: Boolean(hookNotificationContext?.skipSummary),
-      notifyKind: hookNotificationContext?.notifyKind,
-      dedupeKey: hookNotificationContext?.dedupeKey,
-    });
-    printResult(result);
-    return { ok: true, mode: 'notify', result };
   }
 
   if (command === 'run') {

@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.9.0)
+# AI CLI Complete Notify (v2.10.0)
 
-![Version](https://img.shields.io/badge/version-2.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.10.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 
@@ -447,6 +447,16 @@ macOS notes:
 <summary>View version history</summary>
 
 > `v2.x` is the current Tauri-based desktop line. `v1.x` was the Electron-based line.
+
+### 2.10.0
+
+- Improved hybrid routing so Claude and Gemini Hooks can run alongside Watch fallback, while Codex continues using Watch and OpenCode uses its plugin.
+- Improved Gemini Hook/Watch deduplication across different working directories and scoped identical output by session.
+- Reset stale Gemini Watch output when a new user turn starts or the active session file changes.
+- Fixed Gemini Hook stdout output to always return valid JSON while routing notification diagnostics to stderr.
+- Fixed Gemini CLI 0.49+ `AfterAgent` Hook installation to use the required nested schema. Existing legacy flat entries are migrated automatically, unrelated Hooks are preserved, and status/uninstall now recognize the valid structure without false positives.
+- Fixed manual test notifications to bypass deduplication and display real per-channel success or failure details instead of the Gemini Hook `{}` response.
+- Kept direct CLI notifications and the existing output behavior of other sources unchanged.
 
 ### 2.9.0
 

@@ -294,6 +294,7 @@ test('sendNotifications allows Claude watch fallback when hooks are installed', 
   const originalWebhook = require.cache[webhookPath];
   const originalState = require.cache[statePath];
   const calls = [];
+  let dedupeChecks = 0;
 
   delete require.cache[enginePath];
   require.cache[configPath] = {
@@ -339,7 +340,10 @@ test('sendNotifications allows Claude watch fallback when hooks are installed', 
     filename: statePath,
     loaded: true,
     exports: {
-      checkAndRememberNotification: () => false,
+      checkAndRememberNotification: () => {
+        dedupeChecks += 1;
+        return false;
+      },
     },
   };
 
@@ -373,6 +377,22 @@ test('sendNotifications allows Claude watch fallback when hooks are installed', 
     });
     assert.equal(watchResult.skipped, false);
     assert.equal(calls.length, 2);
+    assert.equal(dedupeChecks, 2);
+
+    const testResult = await sendNotifications({
+      source: 'claude',
+      taskInfo: 'Claude manual test',
+      durationMs: 1000,
+      cwd: '/repo',
+      force: true,
+      fromHook: false,
+      skipSummary: true,
+      outputContent: 'manual test',
+      skipDedupe: true,
+    });
+    assert.equal(testResult.skipped, false);
+    assert.equal(calls.length, 3);
+    assert.equal(dedupeChecks, 2);
   } finally {
     if (originalEngine) require.cache[enginePath] = originalEngine;
     else delete require.cache[enginePath];

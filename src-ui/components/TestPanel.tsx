@@ -2,31 +2,19 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { sidecar } from '@/lib/sidecar';
 import { filterNativeNotificationOutput } from '@/lib/native-notification';
-import type { AppConfig } from '@/lib/types';
 import Panel from './ui/Panel';
 
-interface Props {
-  config: AppConfig;
-}
-
-export default function TestPanel({ config }: Props) {
+export default function TestPanel() {
   const { t } = useTranslation();
   const [source, setSource] = useState('claude');
   const [duration, setDuration] = useState(10);
   const [task, setTask] = useState(t('test.defaultTask'));
   const [log, setLog] = useState('');
   const [sending, setSending] = useState(false);
-  // Prefer the hook path for sources that support hooks/plugins when hybrid
-  // (hooks) mode is selected. In pure watch mode, exercise the watch path so
-  // the UI can validate watch fallback for Claude/Gemini.
-  // OpenCode has no watch path, so it always simulates the plugin/hook callback.
-  const useHookSimulation =
-    source === 'opencode'
-    || (config.ui.notificationMode === 'hooks' && (source === 'claude' || source === 'gemini'));
 
   const handleSend = async () => {
     setSending(true);
-    setLog(useHookSimulation ? `${t('log.testing')} (hook simulation)` : t('log.testing'));
+    setLog(t('log.testing'));
     try {
       const args = [
         'notify',
@@ -34,11 +22,12 @@ export default function TestPanel({ config }: Props) {
         '--task', task,
         '--duration-minutes', String(duration),
         '--force',
+        '--skip-dedupe',
       ];
-      if (useHookSimulation) args.push('--from-hook');
       const out = await sidecar(args);
-      const stdout = filterNativeNotificationOutput(out.stdout);
-      setLog(stdout || out.stderr || 'Done');
+      const stdout = filterNativeNotificationOutput(out.stdout).trim();
+      const stderr = out.stderr.trim();
+      setLog([stdout, stderr].filter(Boolean).join('\n') || 'Done');
     } catch (error) {
       setLog(`Error: ${error}`);
     } finally {
@@ -90,11 +79,6 @@ export default function TestPanel({ config }: Props) {
       <pre className="mt-2.5 p-2.5 bg-black/25 border border-white/[0.10] rounded-xl max-h-[220px] overflow-auto text-xs leading-relaxed whitespace-pre-wrap break-all">
         {log || ' '}
       </pre>
-      {useHookSimulation && (
-        <div className="mt-2 text-xs text-muted leading-relaxed">
-          当前会模拟事件回调路径，等价于 Claude Code / Gemini CLI 调用 `notify --from-hook`，或 OpenCode 插件回调该命令。
-        </div>
-      )}
     </Panel>
   );
 }
