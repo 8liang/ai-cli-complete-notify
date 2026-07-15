@@ -1,125 +1,125 @@
-# GitHub Release Update Check
+# GitHub Release 更新检查设计
 
-## Goal
+## 目标
 
-Add a lightweight update check to the About Project page. The app reports whether a newer public release exists and lets the user open GitHub Releases to choose the appropriate Windows ZIP or macOS DMG.
+在“关于项目”页面增加轻量的更新检查功能。应用可以判断是否存在较新的公开版本，并让用户前往 GitHub Releases，自行选择适合 Windows 的 ZIP 或适合 macOS 的 DMG。
 
-## Scope
+## 功能范围
 
-- Check the latest published GitHub Release for `ZekerTop/ai-cli-complete-notify`.
-- Use the build-injected application version as the current version.
-- Check automatically when the About Project page opens and keep a manual recheck action.
-- Use the same GitHub Releases destination on Windows and macOS.
-- Do not download, install, or restart the application automatically.
-- Do not change notification sources, Hooks, Watch, channels, configuration, or packaging.
+- 检查 `ZekerTop/ai-cli-complete-notify` 最新发布的 GitHub Release。
+- 使用构建时注入的应用版本作为当前版本。
+- 打开“关于项目”页面时自动检查，同时保留手动重新检查按钮。
+- Windows 和 macOS 统一跳转到 GitHub Releases。
+- 不自动下载、安装或重启应用。
+- 不修改通知来源、Hook、Watch、通知通道、配置或打包逻辑。
 
-## User Experience
+## 用户体验
 
-Add an unframed update section inside the existing project information card, separated from the project details by a divider.
+在现有项目介绍区域中增加一个不使用独立卡片的更新模块，通过分隔线与项目信息区分。
 
-The section displays:
+该模块显示：
 
-- Current version, for example `v2.11.0`.
-- Latest public version after a successful check.
-- A status message and the appropriate action.
+- 当前版本，例如 `v2.11.0`。
+- 检查成功后的最新公开版本。
+- 当前检查状态及对应操作。
 
-Supported states:
+支持以下状态：
 
-- `checking`: show a progress state and disable the recheck action.
-- `update-available`: show the newer version and a `View GitHub Release` action.
-- `up-to-date`: state that the installed version is current and retain a manual recheck action.
-- `ahead`: state that the installed version is newer than the latest public release, which supports local and development builds.
-- `error`: show a concise retry message and retain a `View GitHub Releases` fallback action.
+- `checking`：显示“正在检查更新”，并禁用重新检查按钮。
+- `update-available`：显示发现的新版本，以及“查看 GitHub Release”按钮。
+- `up-to-date`：显示“当前已是最新版本”，并保留手动重新检查按钮。
+- `ahead`：显示“当前版本高于最新公开版本”，用于本地开发版或尚未发布的版本。
+- `error`：显示简短的检查失败信息，并保留“前往 GitHub Releases”按钮。
 
-The check runs each time the About Project component mounts. Repeated clicks while a request is active are ignored.
+每次“关于项目”组件加载时自动检查。请求尚未完成时，重复点击检查按钮不会发起新的请求。
 
-## Data Source
+## 数据来源
 
-Request:
+请求地址：
 
 ```text
 GET https://api.github.com/repos/ZekerTop/ai-cli-complete-notify/releases/latest
 ```
 
-Use these response fields only:
+只使用响应中的以下字段：
 
-- `tag_name`: latest public release version.
-- `html_url`: exact release page opened when an update is available.
+- `tag_name`：最新公开版本号。
+- `html_url`：发现新版本时打开的具体 Release 页面。
 
-GitHub's `releases/latest` endpoint excludes draft and prerelease entries. This matches the project's workflow: a draft Release does not become visible to installed applications until it is published.
+GitHub 的 `releases/latest` 接口会排除草稿和预发布版本。这与当前项目的发布流程一致：Release 草稿在正式发布前不会被已安装的应用检测到。
 
-The request is made with browser `fetch`. GitHub supports cross-origin requests for this public endpoint, and the existing Tauri configuration does not require an additional HTTP plugin or Rust command.
+请求通过浏览器 `fetch` 发起。GitHub 的公开接口支持跨域请求，当前 Tauri 配置不需要增加 HTTP 插件或 Rust Command。
 
-## Architecture
+## 技术设计
 
-### Version Input
+### 当前版本来源
 
-Continue using `__APP_VERSION__`, which Vite derives from `package.json`. Pass the current version from `App` to `AboutProjectPanel` so the component does not introduce a second version source.
+继续使用 Vite 从 `package.json` 注入的 `__APP_VERSION__`。由 `App` 将当前版本传递给 `AboutProjectPanel`，避免组件内部出现第二个版本来源。
 
-### Update Check Module
+### 更新检查模块
 
-Add a small frontend module responsible for:
+新增一个小型前端模块，负责：
 
-- Normalizing an optional leading `v`.
-- Validating stable `major.minor.patch` versions.
-- Comparing current and latest versions numerically.
-- Fetching and validating the latest Release payload.
-- Returning structured data rather than UI strings.
+- 去掉版本号开头可选的 `v`。
+- 验证稳定版本是否符合 `主版本.次版本.修订版本` 格式。
+- 按数字比较当前版本和最新版本。
+- 请求并验证最新 Release 数据。
+- 返回结构化结果，不包含界面文案。
 
-The module must not open URLs or manage React state. This keeps network and comparison behavior independently testable.
+该模块不负责打开链接，也不管理 React 状态，保证网络请求和版本比较逻辑可以独立测试。
 
-### About Project Component
+### 关于项目组件
 
-`AboutProjectPanel` owns the request lifecycle and display state. It starts the automatic check on mount, exposes the manual recheck action, translates user-facing messages, and opens URLs through the existing Tauri shell plugin.
+`AboutProjectPanel` 负责请求生命周期和界面状态。组件加载时自动检查，提供手动重新检查按钮，显示本地化文案，并通过现有 Tauri Shell 插件打开链接。
 
-When an update is available, open the API response's `html_url`. For error and general browsing states, open:
+发现新版本时，打开 API 返回的 `html_url`。检查失败或用户需要浏览全部版本时，打开：
 
 ```text
 https://github.com/ZekerTop/ai-cli-complete-notify/releases
 ```
 
-## Version Rules
+## 版本比较规则
 
-- Accept `2.11.0` and `v2.11.0`.
-- Compare major, minor, and patch components as integers.
-- Treat current lower than latest as `update-available`.
-- Treat equal versions as `up-to-date`.
-- Treat current higher than latest as `ahead`.
-- Treat malformed current versions, malformed release tags, missing `tag_name`, or missing `html_url` as an error.
-- Do not implement prerelease precedence because the endpoint intentionally ignores prereleases.
+- 接受 `2.11.0` 和 `v2.11.0`。
+- 将主版本、次版本和修订版本分别按整数比较。
+- 当前版本低于最新版本时，状态为 `update-available`。
+- 两个版本相同时，状态为 `up-to-date`。
+- 当前版本高于最新版本时，状态为 `ahead`。
+- 当前版本格式错误、Release Tag 格式错误、缺少 `tag_name` 或缺少 `html_url` 时，视为检查失败。
+- 不实现预发布版本优先级，因为接口本身会忽略预发布版本。
 
-## Error Handling
+## 错误处理
 
-- Network errors, non-2xx responses, GitHub rate limits, and invalid payloads produce the same non-blocking error state.
-- The error does not affect the rest of the About Project page.
-- Do not automatically retry. The user can retry manually.
-- Do not display raw API response bodies or internal stack traces.
-- Keep the general GitHub Releases link available even when checking fails.
+- 网络错误、非 2xx 响应、GitHub 频率限制和无效响应都进入相同的非阻塞错误状态。
+- 检查失败不会影响“关于项目”页面的其他内容。
+- 不自动重试，由用户手动重新检查。
+- 不向用户显示原始 API 响应或内部错误堆栈。
+- 即使检查失败，也保留 GitHub Releases 总页面入口。
 
-## Localization
+## 多语言文案
 
-Add Simplified Chinese and English strings for:
+增加简体中文和英文文案，包括：
 
-- Current version and latest version labels.
-- Checking, update available, up to date, ahead, and error states.
-- Check again, view release, and view Releases actions.
+- 当前版本和最新版本标签。
+- 正在检查、发现更新、已是最新、版本较新和检查失败状态。
+- 重新检查、查看具体 Release 和查看全部 Releases 操作。
 
-No README localization changes are required for this UI-only feature until it is included in a release history entry.
+该功能暂时不需要修改多语言 README，等正式纳入某个版本时再写入版本历史。
 
-## Verification
+## 验证方案
 
-- Unit-test version normalization and comparison for lower, equal, higher, leading-`v`, and malformed inputs.
-- Unit-test successful Release parsing and network, HTTP, and invalid-payload failures with a mocked fetch implementation.
-- Extend About Project source tests to verify the current-version prop, automatic check, manual recheck, release action, and localized copy.
-- Run the complete Node test suite.
-- Run the production UI build.
-- Confirm manually that the current local `2.11.0` build reports `ahead` while GitHub's latest published Release remains `v2.10.0`.
-- Confirm that opening the update action uses the exact Release URL and does not start a download.
+- 单元测试版本格式处理与比较，包括低于、相同、高于、带 `v` 和格式错误的情况。
+- 使用模拟 `fetch` 测试成功响应、网络错误、HTTP 错误和无效响应。
+- 扩展“关于项目”源码测试，检查当前版本参数、自动检查、手动重新检查、Release 跳转和多语言文案。
+- 运行完整 Node 测试套件。
+- 运行 UI 生产构建。
+- 手动确认：当 GitHub 最新公开版本仍为 `v2.10.0` 时，本地 `2.11.0` 应显示“当前版本高于最新公开版本”。
+- 手动确认：更新按钮只打开具体 Release 页面，不自动开始下载。
 
-## Non-Goals
+## 不包含的功能
 
-- Tauri Updater integration.
-- Automatic downloads or installation.
-- Platform-specific asset selection.
-- Background or startup update notifications outside the About Project page.
-- Authentication with GitHub or use of a GitHub token.
+- 接入 Tauri Updater。
+- 自动下载或安装更新。
+- 根据操作系统自动选择发布附件。
+- 在“关于项目”页面以外进行后台或启动更新提醒。
+- 使用 GitHub Token 或进行 GitHub 身份验证。
