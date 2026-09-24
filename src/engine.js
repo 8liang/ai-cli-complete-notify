@@ -4,7 +4,7 @@ const { formatDurationMs, getSourceLabel, buildTitle } = require('./format');
 const { notifyWebhook } = require('./notifiers/webhook');
 const { notifyTelegram } = require('./notifiers/telegram');
 const { notifySound } = require('./notifiers/sound');
-const { notifyDesktopBalloon, prewarmWpf } = require('./notifiers/desktop');
+const { notifyDesktopBalloon, prewarmWpf, supportsDesktopNotifications } = require('./notifiers/desktop');
 const { notifyEmail } = require('./notifiers/email');
 const { notifyGotify } = require('./notifiers/gotify');
 const { summarizeTaskDetailed } = require('./summary');
@@ -21,7 +21,7 @@ function isChannelEnabled(config, channelName, sourceName) {
   const source = config.sources[sourceName];
   const channelPerSource = source && source.channels && source.channels[channelName];
   if (!channelGlobal || !channelPerSource) return false;
-  if (channelName === 'desktop' && process.platform !== 'win32' && process.platform !== 'darwin') {
+  if (channelName === 'desktop' && !supportsDesktopNotifications()) {
     return false;
   }
   if (channelName === 'sound' && process.platform !== 'win32' && process.platform !== 'darwin') {

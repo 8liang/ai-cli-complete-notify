@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.17.0)
+# AI CLI Complete Notify (v2.18.0)
 
-![Version](https://img.shields.io/badge/version-2.17.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.18.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 [![下载 macOS DMG](https://img.shields.io/github/v/release/ZekerTop/ai-cli-complete-notify?label=macOS%20DMG&logo=apple)](https://github.com/ZekerTop/ai-cli-complete-notify/releases/latest)
@@ -162,7 +162,7 @@ macOS 可在 **高级 → 在程序坞中隐藏（仅在 macOS 菜单栏显示�
 
 ## 💻 命令行使用
 
-> WSL 说明：命令行提醒可用（Webhook/Telegram/邮件），声音提醒也可以通过 Windows PowerShell 在 WSL 下工作。桌面通知和托盘仅 Windows 支持。日志监听仅在 AI CLI 运行于 WSL（日志位于 `~/.claude`、`~/.codex`、`~/.gemini`）时生效。WSL/CLI 下，AI 摘要与飞书卡片都建议用 `.env` 控制，且 `.env` 优先于 `settings.json`（见下方示例）。
+> WSL 说明：命令行提醒可用（Webhook/Telegram/邮件），桌面通知和声音均可通过 Windows PowerShell 在 WSL 下工作；托盘仍属于 Windows 桌面应用。日志监听仅在 AI CLI 运行于 WSL（日志位于 `~/.claude`、`~/.codex`、`~/.gemini`）时生效。WSL/CLI 下，AI 摘要与飞书卡片都建议用 `.env` 控制，且 `.env` 优先于 `settings.json`（见下方示例）。
 
 命令行（源码方式）使用前请先执行 `npm install`。
 
@@ -234,7 +234,7 @@ wslpath -w ~/.codex
 ```
 
 提示：
-- WSL 场景建议优先使用 Webhook / Telegram / 邮件；托盘属于 Windows GUI 功能。
+- WSL 可通过 Windows PowerShell 使用桌面通知和声音，也可继续使用 Webhook / Telegram / 邮件；托盘仍属于 Windows 桌面应用。
 - 若你在 WSL 里跑 CLI，但想让 webhook、摘要等配置生效，优先写 `.env`；桌面应用里已经保存过的全局通道开关仍以 `settings.json` 为准。
 
 ### 直接通知
@@ -602,6 +602,11 @@ macOS 说明：
 <summary>展开 / 收起版本历史</summary>
 
 > `v2.x` 是当前的 Tauri 桌面版本线，`v1.x` 为旧的 Electron 版本线。
+
+
+### 2.18.0
+
+- 新增 WSL CLI 与 Hook 调用 Windows 桌面通知：复用现有 Windows PowerShell toast/balloon 链路，无需外网、MCP 或额外常驻服务；纯 Linux 行为保持不变。
 
 
 ### 2.17.0

@@ -2,9 +2,9 @@
 
 <img width="128" src="https://github.com/ZekerTop/ai-cli-complete-notify/blob/main/desktop/assets/tray.png?raw=true">
 
-# AI CLI Complete Notify (v2.17.0)
+# AI CLI Complete Notify (v2.18.0)
 
-![Version](https://img.shields.io/badge/version-2.17.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.18.0-blue.svg)
 ![License](https://img.shields.io/badge/license-ISC-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20WSL-lightgrey.svg)
 [![Download macOS DMG](https://img.shields.io/github/v/release/ZekerTop/ai-cli-complete-notify?label=macOS%20DMG&logo=apple)](https://github.com/ZekerTop/ai-cli-complete-notify/releases/latest)
@@ -161,7 +161,7 @@ On macOS, enable **Advanced → Hide from Dock (show only in macOS menu bar)** t
 
 ## 💻 Command Line Usage
 
-> WSL note: CLI reminders work for webhook/Telegram/email, and sound can also work in WSL through Windows PowerShell. Desktop notifications and tray are Windows-only. Log monitoring works only when the AI CLI runs inside WSL (logs under `~/.claude`, `~/.codex`, `~/.gemini`). For WSL/CLI config, use `.env` for AI summary and Feishu card; `.env` overrides `settings.json`.
+> WSL note: CLI reminders work for webhook/Telegram/email. Desktop notifications and sound can use Windows PowerShell from WSL; tray remains a Windows-app feature. Log monitoring works only when the AI CLI runs inside WSL (logs under `~/.claude`, `~/.codex`, `~/.gemini`). For WSL/CLI config, use `.env` for AI summary and Feishu card; `.env` overrides `settings.json`.
 
 Note: For CLI usage from source (Node), run `npm install` first.
 
@@ -233,7 +233,7 @@ wslpath -w ~/.codex
 ```
 
 Notes:
-- In WSL, prefer webhook/Telegram/email channels; tray is a Windows GUI feature.
+- In WSL, desktop notifications and sound use Windows PowerShell; webhook/Telegram/email remain available, while tray is still a Windows-app feature.
 - For WSL CLI behavior, prefer `.env` for webhook and summary-related settings; global channel switches already saved in the desktop app still follow `settings.json`.
 
 ### Direct Notification
@@ -555,6 +555,11 @@ macOS notes:
 <summary>View version history</summary>
 
 > `v2.x` is the current Tauri-based desktop line. `v1.x` was the Electron-based line.
+
+
+### 2.18.0
+
+- Added Windows desktop notifications for WSL CLI and Hook runs by reusing the existing Windows PowerShell toast/balloon path. No external network, MCP, or background service is required; pure Linux remains unchanged.
 
 
 ### 2.17.0

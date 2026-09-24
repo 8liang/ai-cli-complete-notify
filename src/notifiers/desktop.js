@@ -2,8 +2,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const { isWsl, resolvePowerShell } = require('./sound');
 
 const MACOS_DESKTOP_NOTIFICATION_PREFIX = '__AI_CLI_COMPLETE_NOTIFY_DESKTOP__';
+
+function supportsDesktopNotifications(platform = process.platform, wsl = isWsl()) {
+  return platform === 'win32' || platform === 'darwin' || (platform === 'linux' && wsl);
+}
 
 function escapeXml(value) {
   return String(value || '')
@@ -290,6 +295,11 @@ function showPopupWpf({ title, message, timeoutMs, onClick, clickHint, kind, pro
 function notifyDesktopViaPowerShell({ finalTitle, body, timeoutMs, onClick, kind, clickHint }) {
   return new Promise((resolve) => {
     try {
+      const powershell = resolvePowerShell();
+      if (!powershell) {
+        resolve({ ok: false, clicked: false, mode: '', error: 'Windows PowerShell not available' });
+        return;
+      }
       const ms = Math.max(1200, Number.isFinite(timeoutMs) ? timeoutMs : 6000);
       const safeTitle = escapePsSingle(finalTitle);
       const safeMessage = escapePsSingle(body);
@@ -376,7 +386,7 @@ function notifyDesktopViaPowerShell({ finalTitle, body, timeoutMs, onClick, kind
       ].join('\n');
 
       const processRef = spawn(
-        'powershell',
+        powershell,
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Sta', '-Command', psScript],
         { shell: false, windowsHide: true }
       );
@@ -439,7 +449,8 @@ function notifyDesktopViaMacOs({ finalTitle, body }) {
 function notifyDesktopBalloon({ title, message, timeoutMs, onClick, clickHint, kind, projectName }) {
   return new Promise((resolve) => {
     try {
-      if (process.platform !== 'win32' && process.platform !== 'darwin') {
+      const wsl = isWsl();
+      if (!supportsDesktopNotifications(process.platform, wsl)) {
         resolve({ ok: false, error: 'desktop notifications not supported on this platform' });
         return;
       }
@@ -454,6 +465,11 @@ function notifyDesktopBalloon({ title, message, timeoutMs, onClick, clickHint, k
 
       if (process.platform === 'darwin') {
         notifyDesktopViaMacOs({ finalTitle, body }).then(resolve);
+        return;
+      }
+
+      if (wsl) {
+        notifyDesktopViaPowerShell({ finalTitle, body, timeoutMs, onClick, kind, clickHint: plainHint }).then(resolve);
         return;
       }
 
@@ -526,4 +542,5 @@ module.exports = {
   getMacOsDesktopNotificationLine,
   notifyDesktopBalloon,
   prewarmWpf,
+  supportsDesktopNotifications,
 };

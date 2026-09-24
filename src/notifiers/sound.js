@@ -12,9 +12,9 @@ function isWsl() {
   }
 }
 
-function resolvePowerShell() {
-  if (process.platform === 'win32') return 'powershell';
-  if (!isWsl()) return null;
+function resolvePowerShell(platform = process.platform, wsl = isWsl()) {
+  if (platform === 'win32') return 'powershell';
+  if (platform !== 'linux' || !wsl) return null;
   const candidates = [
     '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
     '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'.replace(/\\/g, '/'),
@@ -177,5 +177,7 @@ function notifySound({ config, title }) {
 
 module.exports = {
   getMacTtsProcessSpec,
+  isWsl,
+  resolvePowerShell,
   notifySound
 };
