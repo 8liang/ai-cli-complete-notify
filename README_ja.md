@@ -45,7 +45,7 @@ AI CLI Complete Notify は、Claude Code / Codex / OpenCode / Gemini / ZCode 向
 - 🔀 **ソース別制御**: Claude / Codex / OpenCode / Gemini / ZCode ごとに有効化、所要時間しきい値、通知チャネルを設定できます。
 - 📡 **複数チャネル通知**: Webhook、Telegram、Email、デスクトップ通知、サウンドを同時に利用できます。
 - ⏱️ **所要時間しきい値**: 指定時間を超えたタスクだけ通知し、細かすぎる通知を減らします。
-- 🪝 **Hooks + Watch 統合**: Claude Code / Gemini CLI / ZCode はネイティブ Hook、OpenCode はグローバルプラグインイベントを利用でき、Codex は主にログ Watch を使います。
+- 🪝 **Hooks + Watch 統合**: Claude Code / Codex / Gemini CLI / ZCode はネイティブ Hook、OpenCode はグローバルプラグインイベントを利用でき、Watch はフォールバックとして利用できます。
 - 🧠 **AI Summary（任意）**: タスク完了後に短い要約を生成し、失敗またはタイムアウト時は元の内容にフォールバックします。
 - 🖥️ **デスクトップアプリ**: GUI 設定、言語切り替え、トレイ / macOS メニューバーへの格納、ログイン時起動に対応します。
 - 🔐 **設定の分離**: 実行設定と Token / Webhook / Email などの機密情報を分けて管理できます。
@@ -60,13 +60,14 @@ AI CLI Complete Notify は、Claude Code / Codex / OpenCode / Gemini / ZCode 向
 
 - Claude Code は 1 つの依頼を複数のサブタスクに分けることがあります。通知が多くなりすぎないよう、このツールは全体のターンが完了したときだけ通知します。
 - Watch モードはログの変化から完了を推定するため、一定の静かな時間を待ってから通知します。即時通知ではありません。
-- より速く正確な通知が必要な場合、Claude Code / Gemini CLI / ZCode は Hook、OpenCode はグローバルプラグインを優先してください。Codex や fallback 用途では Watch を使います。
+- より速く正確な通知が必要な場合、Claude Code / Codex / Gemini CLI / ZCode は Hook、OpenCode はグローバルプラグインを優先してください。Codex にはネイティブ hooks 対応版と信頼の承認が必要です。ネイティブ hooks 未対応または hooks が無効のクライアントでは Watch を使い、ハイブリッドモードでも Watch をフォールバックとして維持します。
+- ハイブリッドモードは Hook と Watch を併用し、同じ完了イベントの通知を重複排除します。Watch のみのモードでは Claude/Codex/Gemini hooks を抑止しますが、Hook／プラグイン専用の OpenCode、Herdr、ZCode は抑止しません。
 
 ## Hooks と Watch の違い
 
-- **Hook / プラグインイベント** は AI CLI 自身が発行するライフサイクルイベント（例: Claude Code / ZCode の `Stop`、Gemini CLI の `AfterAgent`、OpenCode の `session.status` idle）を使うため、実際の完了時点に近い通知ができます。
+- **Hook / プラグインイベント** は AI CLI 自身が発行するライフサイクルイベント（例: Claude Code / Codex / ZCode の `Stop`、Gemini CLI の `AfterAgent`、OpenCode の `session.status` idle）を使うため、実際の完了時点に近い通知ができます。
 - **Hook** は対象ツールに対して長時間のバックグラウンドログ監視を常駐させる必要がありません。
-- **Watch** は汎用 fallback です。Codex や Hook 未設定の環境で有用です。
+- **Watch** は汎用 fallback です。ネイティブ hooks 未対応、無効または未設定の Codex クライアントで有用です。
 
 ## 🚀 クイックスタート
 
@@ -182,6 +183,14 @@ node ai-reminder.js hooks status
 # Claude Code Hook をインストール
 node ai-reminder.js hooks install --target claude
 
+# Codex Hook をインストール（ユーザーレベル、後で Codex /hooks で review / trust）
+node ai-reminder.js hooks install --target codex
+
+# Codex Hook の状態確認、プレビュー、アンインストール
+node ai-reminder.js hooks status --target codex
+node ai-reminder.js hooks preview --target codex
+node ai-reminder.js hooks uninstall --target codex
+
 # Gemini CLI Hook をインストール
 node ai-reminder.js hooks install --target gemini
 
@@ -194,6 +203,8 @@ node ai-reminder.js hooks install --target herdr
 # ZCode Hook をインストール（ユーザーレベル、ZCode の hooks runner を自動有効化）
 node ai-reminder.js hooks install --target zcode
 ```
+
+Codex は `CODEX_HOME/hooks.json`（デフォルト `~/.codex/hooks.json`）に `UserPromptSubmit` と `Stop` の command hooks を登録し、既存の設定と他の Hook を保持します。アンインストールは本ツールのハンドラーのみ削除します。`UserPromptSubmit` で計時を開始し、`Stop` で所要時間のしきい値を確認します。`0` は各ターン完了時の通知を許可します。**設定済みでも有効とは限りません**。インストールや更新後、ネイティブ hooks 対応の Codex で `/hooks` を開き、新しい定義を review / trust して、hooks が有効になっていることを確認してください。インストーラーは信頼の承認や無効な hooks runner の有効化を行いません。ネイティブ hooks 未対応または hooks が無効のクライアントでは Watch を使い、ハイブリッドモードでも Watch をフォールバックとして維持します。
 
 ZCode は Hook 専用で Watch 経路がなく、デフォルトでは無効です（`sources.zcode.enabled`）。インストール時にユーザーレベルの `~/.zcode/cli/config.json` へ `UserPromptSubmit` と `Stop` の process Hook を登録し、`hooks.enabled` を有効にします。他の Hook と既存の設定を保持し、アンインストールでは本ツールのハンドラーのみ削除します。
 ZCode ソースを有効にし、**Hooks / Plugin Integration** で Hook をインストールしてから、新しい ZCode セッションを開始してください。`UserPromptSubmit` で計時を開始し、`Stop` で所要時間のしきい値を確認します。`0` は各ターン完了時の通知を許可し、正の値は指定した分数以上の実行を必要とします。開始時刻がない場合、正のしきい値では通知しません。以前の Stop 専用設定からは Hook の再インストールが必要です。ZCode のチャネル設定は個別に変更できますが、送信には対応するグローバルチャネルの有効化と設定が必要です。
@@ -329,7 +340,7 @@ macOS の注意:
 - `notify` は時間しきい値を無視して即時通知します。
 - Webhook はデフォルトで Feishu post 形式を使います。WeCom / DingTalk はテキスト形式で送信されます。
 - スマートバンド / ウォッチ通知は、通常スマートフォン通知同期、Webhook relay、Telegram、Email を通じて間接的に実現します。
-- Hooks / プラグインモードは Claude Code / Gemini CLI / OpenCode / ZCode に向いています。Watch は主に Codex または fallback 用です。
+- Hooks / プラグインモードは Claude Code / 対応 Codex クライアント / Gemini CLI / OpenCode / ZCode に向いています。Watch を併用するハイブリッドモードを推奨します。Codex では `/hooks` で review / trust して hooks を有効にしてください。
 
 ## 変更履歴
 
@@ -342,7 +353,13 @@ macOS の注意:
 ### 2.18.0
 
 - WSL の CLI / Hook から Windows デスクトップ通知を送れるようになりました。既存の Windows PowerShell toast/balloon 経路を再利用するため、外部ネットワーク、MCP、常駐サービスは不要です。純粋な Linux の動作は変わりません。
-
+- [Issue #41](https://github.com/ZekerTop/ai-cli-complete-notify/issues/41) に対応し、Codex のネイティブ hooks を追加しました。**Hooks / Plugin Integration** の Codex カードと CLI から、インストール、アンインストール、状態確認、プレビューを利用できます。他の Hook を保持し、`CODEX_HOME/hooks.json`（デフォルト `~/.codex/hooks.json`）に定義を書き込みます。
+- `UserPromptSubmit` が開始時刻を記録し、`Stop` が所要時間のしきい値を確認します。計時は session / turn ごとに分離され、`0` は各ターン完了時の通知を許可します。正のしきい値には有効な所要時間の記録が必要です。
+- Codex Hook と Watch は session / turn に基づく完了通知の重複排除を共有します。transcript のメタデータに基づき、明示的な subagent セッションと、goal が `active` または `paused` の間の中間完了イベントを除外します。
+- 設定済みでも実行されるとは限りません。インストールや更新後、Codex `/hooks` で定義を review / trust し、hooks を有効にしてください。ハイブリッドモードは Watch フォールバックを維持し、ネイティブ hooks 未対応または無効のクライアントは Watch を引き続き利用できます。Watch のみのモードでは Codex hooks も抑止します。
+- Codex Hook / Watch の同時実行候補は、同じ session / turn に対してアトミックな処理枠の確保を行い、重複を排除します。最初の送信がすべてのチャネルで失敗した場合は後続候補が引き継げるため、失敗記録が Watch の再送を妨げません。
+- transcript に明示的な `task_complete` 時刻がある場合、非同期 `Stop` は実際の完了時刻で所要時間のしきい値を判定し、処理遅延をタスク実行時間に含めません。
+- macOS DMG パッケージ作成時の `LC_ALL` 環境との互換性を修正し、アプリを Applications にドラッグする標準のインストールレイアウトを維持しました。
 
 ### 2.17.0
 

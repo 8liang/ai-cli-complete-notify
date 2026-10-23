@@ -48,6 +48,7 @@ function markReminderShown(source) {
 function getSourceDisplayName(source) {
   const names = {
     claude: 'Claude Code',
+    codex: 'Codex',
     gemini: 'Gemini CLI',
     opencode: 'OpenCode',
     zcode: 'ZCode CLI'
@@ -128,7 +129,7 @@ function checkAndRemindHooks(sources, options = {}) {
 
   // Expand 'all' to specific sources
   const expandedSources = sourceList.includes('all')
-    ? ['claude', 'gemini', 'opencode']
+    ? ['claude', 'codex', 'gemini', 'opencode']
     : sourceList;
 
   // Check hook status
@@ -136,8 +137,6 @@ function checkAndRemindHooks(sources, options = {}) {
   const uninstalledSources = [];
 
   for (const source of expandedSources) {
-    if (source === 'codex') continue; // Codex doesn't support hooks
-
     const status = hookStatus[source];
     if (status && status.installed === false) {
       uninstalledSources.push(source);

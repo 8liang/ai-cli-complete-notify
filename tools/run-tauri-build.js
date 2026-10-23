@@ -14,6 +14,8 @@ function ensureDir(dirPath) {
 
 function resolveWindowsRustEnv(rootDir) {
   const env = { ...process.env };
+  // macOS system Perl, used by the DMG bundler, rejects C.UTF-8.
+  if (process.platform === 'darwin') env.LC_ALL = 'C';
 
   if (process.platform !== 'win32') {
     return env;

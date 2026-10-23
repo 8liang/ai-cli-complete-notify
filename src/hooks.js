@@ -54,6 +54,11 @@ function getGeminiSettingsPath() {
   return path.join(os.homedir(), '.gemini', 'settings.json');
 }
 
+function getCodexSettingsPath() {
+  const codexHome = String(process.env.CODEX_HOME || '').trim();
+  return path.join(codexHome ? path.resolve(codexHome) : path.join(os.homedir(), '.codex'), 'hooks.json');
+}
+
 function getOpenCodeConfigDir() {
   const override = String(process.env.OPENCODE_CONFIG_DIR || '').trim();
   if (override) return path.resolve(override);
@@ -323,6 +328,97 @@ function getGeminiHookStatus() {
   const list = Array.isArray(hooks.AfterAgent) ? hooks.AfterAgent : [];
   const installed = list.some((definition) =>
     extractHookCommands(definition).some((hook) => isOurGeminiHook(hook))
+  );
+  return { installed, settingsPath };
+}
+
+function readCodexHookSettings(settingsPath) {
+  try {
+    if (!fs.existsSync(settingsPath)) return { ok: true, settings: {} };
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return { ok: false, error: `Codex hooks config is not a JSON object: ${settingsPath}` };
+    }
+    if (settings.hooks !== undefined
+      && (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks))) {
+      return { ok: false, error: `Codex hooks config has an invalid hooks object: ${settingsPath}` };
+    }
+    for (const event of ['UserPromptSubmit', 'Stop']) {
+      if (settings.hooks?.[event] !== undefined && !Array.isArray(settings.hooks[event])) {
+        return { ok: false, error: `Codex ${event} hooks are not an array: ${settingsPath}` };
+      }
+    }
+    return { ok: true, settings };
+  } catch (_error) {
+    return { ok: false, error: `Codex hooks config could not be read as valid JSON: ${settingsPath}` };
+  }
+}
+
+function isOurCodexHook(hook) {
+  return isOurHookCommand(hook?.command)
+    && /(?:^|\s)--source(?:\s+|=)codex(?:\s|$)/.test(hook.command);
+}
+
+function removeOurCodexHooks(blocks) {
+  return blocks.flatMap((block) => {
+    if (!block || typeof block !== 'object' || !Array.isArray(block.hooks)) return [block];
+    const remaining = block.hooks.filter((hook) => !isOurCodexHook(hook));
+    if (remaining.length === block.hooks.length) return [block];
+    return remaining.length ? [{ ...block, hooks: remaining }] : [];
+  });
+}
+
+function buildCodexHooks(exePath) {
+  const prefix = exePath.endsWith('.js')
+    ? `${shellQuote(process.execPath)} ${shellQuote(exePath)}`
+    : shellQuote(exePath);
+  const command = `${prefix} notify --source codex --from-hook`;
+  return {
+    UserPromptSubmit: [{ hooks: [{ type: 'command', command }] }],
+    Stop: [{ hooks: [{ type: 'command', command, async: true, timeout: 120 }] }]
+  };
+}
+
+function installCodexHook(exePath) {
+  const settingsPath = getCodexSettingsPath();
+  const parsed = readCodexHookSettings(settingsPath);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const settings = parsed.settings;
+  if (!settings.hooks) settings.hooks = {};
+  const desired = buildCodexHooks(exePath);
+  for (const event of Object.keys(desired)) {
+    settings.hooks[event] = [
+      ...removeOurCodexHooks(settings.hooks[event] || []),
+      ...desired[event]
+    ];
+  }
+  writeJsonFile(settingsPath, settings);
+  return { ok: true, settingsPath };
+}
+
+function uninstallCodexHook() {
+  const settingsPath = getCodexSettingsPath();
+  const parsed = readCodexHookSettings(settingsPath);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const settings = parsed.settings;
+  if (!settings.hooks) return { ok: true, settingsPath };
+  for (const event of ['UserPromptSubmit', 'Stop']) {
+    if (!Array.isArray(settings.hooks[event])) continue;
+    const remaining = removeOurCodexHooks(settings.hooks[event]);
+    if (remaining.length) settings.hooks[event] = remaining;
+    else delete settings.hooks[event];
+  }
+  if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+  writeJsonFile(settingsPath, settings);
+  return { ok: true, settingsPath };
+}
+
+function getCodexHookStatus() {
+  const settingsPath = getCodexSettingsPath();
+  const parsed = readCodexHookSettings(settingsPath);
+  const installed = parsed.ok && ['UserPromptSubmit', 'Stop'].every((event) =>
+    (parsed.settings.hooks?.[event] || []).some((block) =>
+      Array.isArray(block?.hooks) && block.hooks.some(isOurCodexHook))
   );
   return { installed, settingsPath };
 }
@@ -1040,6 +1136,7 @@ function getHookStatus(target) {
   if (target === 'herdr') return { herdr: getHerdrHookStatus() };
   return {
     claude: getClaudeHookStatus(),
+    codex: getCodexHookStatus(),
     gemini: getGeminiHookStatus(),
     opencode: getOpenCodeHookStatus(),
     zcode: getZcodeHookStatus(),
@@ -1050,6 +1147,7 @@ function getHookStatus(target) {
 function installHook(target) {
   const exePath = getExePath();
   if (target === 'claude') return installClaudeHook(exePath);
+  if (target === 'codex') return installCodexHook(exePath);
   if (target === 'gemini') return installGeminiHook(exePath);
   if (target === 'opencode') return installOpenCodeHook(exePath);
   if (target === 'herdr') return installHerdrHook(exePath);
@@ -1059,6 +1157,7 @@ function installHook(target) {
 
 function uninstallHook(target) {
   if (target === 'claude') return uninstallClaudeHook();
+  if (target === 'codex') return uninstallCodexHook();
   if (target === 'gemini') return uninstallGeminiHook();
   if (target === 'opencode') return uninstallOpenCodeHook();
   if (target === 'herdr') return uninstallHerdrHook();
@@ -1071,6 +1170,9 @@ function getHookConfigPreview(target) {
   if (target === 'claude') {
     const hooks = buildClaudeHooks(exePath);
     return JSON.stringify({ hooks }, null, 2);
+  }
+  if (target === 'codex') {
+    return JSON.stringify({ hooks: buildCodexHooks(exePath) }, null, 2);
   }
   if (target === 'gemini') {
     const hooks = { AfterAgent: buildGeminiHooks(exePath) };

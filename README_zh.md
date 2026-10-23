@@ -46,7 +46,7 @@
 - 🔀 **分源控制**：Claude / Codex / OpenCode / Gemini / ZCode 独立启用与阈值设置
 - 📡 **多通道推送**：同时支持多种通知方式，确保消息送达
 - ⏱️ **耗时阈值**：只在任务超过设定时长时提醒，避免频繁打扰
-- 🪝 **Hooks + Watch 混合集成**：Claude Code / Gemini CLI / ZCode 可走原生 Hook，OpenCode 可走全局插件事件，Codex 继续通过日志监听完成提醒
+- 🪝 **Hooks + Watch 混合集成**：Claude Code / Codex / Gemini CLI / ZCode 可走原生 Hook，OpenCode 可走全局插件事件，Watch 保留兜底
 - 🧠 **AI 摘要（可选）**：任务完成后快速生成简短摘要，超时自动回退
 - 🖥️ **桌面应用**：图形界面配置，支持中英文切换、托盘隐藏、开机自启
 - 🔐 **配置分离**：运行配置与敏感信息分离，安全可靠
@@ -65,15 +65,15 @@
 
 - Claude Code 往往会拆分为多个子任务，为避免每个子任务都提醒，本项目只在“整轮完成”后再通知。
 - 监听模式依赖日志变化，需要一个去抖静默时间确认结束，因此提醒不是即时触发（默认有工具调用时 60 秒、无工具调用时 15 秒）。
-- 如果想要更快、更干净的提醒：Claude Code / Gemini CLI / ZCode 优先使用 Hook，OpenCode 优先使用全局插件；Codex 或其他兜底场景继续使用 Watch。
-- Watch 与 Hooks **在混合模式下可以同时开启**。推荐混合：Codex 用 Watch，Claude Code / Gemini / OpenCode / ZCode 用 Hooks 或插件；同一来源若两条路径都触发，会按内容去重，只提醒一次。**仅 Watch** 模式会屏蔽 Claude/Gemini 已安装的 hooks，使两种模式语义保持区分；仅走 Hook 的来源（OpenCode、Herdr、ZCode）不会被该模式屏蔽。
+- 如果想要更快、更干净的提醒：Claude Code / Codex / Gemini CLI / ZCode 优先使用 Hook，OpenCode 优先使用全局插件。Codex 需要客户端版本支持原生 hooks 并完成信任；未支持或未启用原生 hooks 的客户端继续使用 Watch；混合模式保留 Watch 兜底。
+- Watch 与 Hooks **在混合模式下可以同时开启**。推荐混合：Claude Code / Codex / Gemini / OpenCode / ZCode 用 Hooks 或插件，同时保留可用的 Watch 兜底；Codex Hook 与 Watch 按同一 session / turn 去重，其他来源沿用既有的内容去重。**仅 Watch** 模式会屏蔽 Claude/Codex/Gemini 已安装的 hooks，使两种模式语义保持区分；仅走 Hook 的来源（OpenCode、Herdr、ZCode）不会被该模式屏蔽。
 
 ## Hooks 与 Watch 的区别
 
-- **Hook / 插件事件** 直接利用 AI CLI 自己发出的显式生命周期事件。对 Claude Code、Gemini CLI、OpenCode 和 ZCode 来说，这意味着提醒可以更接近真实完成时刻，而不是依赖静默时间去猜测。
+- **Hook / 插件事件** 直接利用 AI CLI 自己发出的显式生命周期事件。对 Claude Code、支持原生 hooks 的 Codex 客户端、Gemini CLI、OpenCode 和 ZCode 来说，这意味着提醒可以更接近真实完成时刻，而不是依赖静默时间去猜测。
 - **Hook** 不需要为这些工具长期常驻一个后台监听器，空闲期开销更小，也更不容易因为日志解析产生误判。
-- **Watch** 仍然是通用兜底方案。它很适合 Codex，也适合没有配置 Hook 的场景，但它必须依赖本地日志和去抖静默时间来推断一轮是否真正结束。
-- 实际上，之所以增加 Hook / 插件事件选项，主要是因为 Claude Code 的 `Stop`、ZCode 的 `Stop`、Gemini CLI 的 `AfterAgent`，以及 OpenCode 的 `session.status` idle / `session.idle` / `session.error`，相比日志轮询能提供更及时、更准确的完成信号；而在当前集成里，Codex 仍以 Watch 作为主要完成提醒路径。
+- **Watch** 仍然是通用兜底方案。它适用于未支持或未启用原生 hooks 的 Codex 客户端，也适合没有配置 Hook 的场景，但它必须依赖本地日志和去抖静默时间来推断一轮是否真正结束。
+- 实际上，之所以增加 Hook / 插件事件选项，主要是因为 Claude Code 的 `Stop`、Codex 的 `Stop`、ZCode 的 `Stop`、Gemini CLI 的 `AfterAgent`，以及 OpenCode 的 `session.status` idle / `session.idle` / `session.error`，相比日志轮询能提供更及时、更准确的完成信号；支持原生 hooks 的 Codex 客户端也可通过 Hook 提醒，同时保留 Watch 兜底。
 
 ## 🚀 快速开始
 
@@ -244,7 +244,7 @@ wslpath -w ~/.codex
 node ai-reminder.js notify --source claude --task "任务完成"
 ```
 
-### 原生 Hook / 插件模式（推荐用于 Claude Code / Gemini CLI / OpenCode / Herdr / ZCode）
+### 原生 Hook / 插件模式（推荐用于 Claude Code / Codex / Gemini CLI / OpenCode / Herdr / ZCode）
 
 ```bash
 # 查看当前 Hook 状态
@@ -252,6 +252,14 @@ node ai-reminder.js hooks status
 
 # 安装 Claude Code Hook
 node ai-reminder.js hooks install --target claude
+
+# 安装 Codex Hook（用户级；安装后需在 Codex /hooks 中 review / trust）
+node ai-reminder.js hooks install --target codex
+
+# 查看、预览或卸载 Codex Hook
+node ai-reminder.js hooks status --target codex
+node ai-reminder.js hooks preview --target codex
+node ai-reminder.js hooks uninstall --target codex
 
 # 安装 Gemini CLI Hook
 node ai-reminder.js hooks install --target gemini
@@ -281,7 +289,8 @@ node ai-reminder.js hooks uninstall --target herdr
 - 启用 ZCode 来源后，在「Hooks / 插件集成」安装 ZCode Hook，再新建 ZCode 会话。`UserPromptSubmit` 开始计时，`Stop` 按「超过(分钟)才提醒」的阈值判断：设为 `0` 时每轮完成均可提醒，正数表示至少运行相应分钟数；没有开始时间记录时，正数阈值下不会发送提醒。旧版仅安装 `Stop` 的用户需重新安装 Hook。ZCode 的通道开关可独立调整，实际发送仍要求对应全局通道已启用并配置完成。
 - 安装或更新 ZCode Hook 后，请**完全退出 ZCode，再重新打开并新建会话**，不要继续安装前的旧会话。旧会话可能仍使用启动时加载的 Hook 配置。若「测试通知」成功但实际任务没有提醒，先确认 ZCode 来源与目标通道已启用，将阈值临时设为 `0`，再按上述步骤用新会话测试。「测试通知」会直接发送并跳过耗时阈值，不能验证真实 Hook 是否执行。
 - Herdr 通过 `herdr plugin install` 安装 [`herdr-ai-notify`](https://github.com/8liang/herdr-ai-notify) 插件，监听 `pane.agent_status_changed`（`done` / `blocked`），并自动把当前可执行文件路径写入插件配置目录下的 `config.env`（`AI_REMINDER_PATH`）。Herdr 通知使用独立的 `herdr` 源，标题前缀显示 `[Herdr]`，其通道可在 `sources.herdr` 中单独配置。社区插件强制发送事件，耗时阈值不会过滤这些提醒。
-- 当前集成下，Codex 的任务完成提醒仍主要通过 Watch 模式处理。
+- Codex 安装会在 `CODEX_HOME/hooks.json`（默认 `~/.codex/hooks.json`）注册 `UserPromptSubmit` 和 `Stop` command hooks，保留既有设置与其他 Hook。`UserPromptSubmit` 开始计时，`Stop` 按配置的耗时阈值判断；阈值为 `0` 时每轮完成均可提醒。卸载只移除本工具的处理器。
+- **已配置不代表已启用**：安装或更新后，需要进入支持原生 hooks 的 Codex，在 `/hooks` 中 review / trust 新定义，并确认 hooks 已开启。安装器不会修改 Codex 的信任决定，也不会开启已关闭的 hooks runner。并非所有 Codex 客户端都支持原生 hooks，未支持或未启用原生 hooks 的客户端继续使用 Watch；混合模式保留 Watch 兜底。
 
 ### 可选第三方工具（Herdr）
 
@@ -592,7 +601,7 @@ macOS 说明：
 - 🎯 **智能去抖**会根据 AI 消息类型自动调整等待时间，提升提醒准确性
 - 💡 **监听模式**适合长时间运行，建议设置开机自启或在后台终端中保持运行
 - 💡 **EXE 启动默认开启 Watch 监听**：如不需要可在顶部开关关闭。
-- 🪝 **Hooks / 插件模式**更适合 Claude Code / Gemini CLI / OpenCode / ZCode，因为它直接使用显式完成事件；开启后，Watch 主要保留给 Codex。
+- 🪝 **Hooks / 插件模式**适用于 Claude Code / 支持原生 hooks 的 Codex 客户端 / Gemini CLI / OpenCode / ZCode，直接使用显式完成事件；推荐混合模式，同时保留 Watch 兜底。Codex 需在 `/hooks` 中完成 review / trust 并开启 hooks。
 - ✅ **确认提醒开关建议（默认关闭）**：当 AI 经常问你“是否继续/是否授权/请确认”时建议开启；如果你只想收到“任务完成提醒”，建议保持关闭，避免中间输出触发提醒。注意：若你在 `.env` 里设置了 `CODEX_COMPLETION_ONLY=1`，Codex 的确认提醒会被禁用（需改为 `0` 或删除该项）。
 - 🧭 **点击切回**更可靠，但仍受系统焦点限制；若是 VSCode 插件场景，建议选择 VSCode 目标，并确保 VSCode 未最小化/未被专注助手拦截
 
@@ -607,7 +616,13 @@ macOS 说明：
 ### 2.18.0
 
 - 新增 WSL CLI 与 Hook 调用 Windows 桌面通知：复用现有 Windows PowerShell toast/balloon 链路，无需外网、MCP 或额外常驻服务；纯 Linux 行为保持不变。
-
+- 支持 [Issue #41](https://github.com/ZekerTop/ai-cli-complete-notify/issues/41) 提出的 Codex 原生 hooks：「Hooks / 插件集成」新增 Codex 卡片，CLI 支持安装、卸载、状态和预览。定义写入 `CODEX_HOME/hooks.json`（默认 `~/.codex/hooks.json`），保留其他 Hook。
+- `UserPromptSubmit` 记录开始时间，`Stop` 检查配置的耗时阈值；计时按 session 与 turn 隔离。阈值为 `0` 时每轮完成均可提醒，正数阈值需要有效的耗时记录。
+- Codex Hook 与 Watch 共用 session / turn 完成去重；根据 transcript 元数据过滤明确的 subagent 会话，以及 goal 为 `active` 或 `paused` 时的中间完成事件。
+- 已配置不等于实际执行：安装或更新后，需在 Codex `/hooks` 中 review / trust 新定义并确认 hooks 已开启。混合模式保留 Watch 兜底；未支持或未启用原生 hooks 的客户端继续使用 Watch。「仅 Watch」模式也会屏蔽 Codex hooks。
+- Codex Hook / Watch 并发候选使用原子占位，对同一 session / turn 去重；首次发送的全部通道失败时，后续候选可接棒，避免失败记录挡住 Watch 补发。
+- 异步 `Stop` 在 transcript 提供明确的 `task_complete` 时间时，用实际完成时间计算耗时阈值，避免处理延迟把短任务当成长任务。
+- 修复 macOS DMG 打包的 `LC_ALL` 环境兼容问题，保留应用拖入 Applications 的标准安装布局。
 
 ### 2.17.0
 

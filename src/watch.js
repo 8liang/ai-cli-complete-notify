@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 
 const { sendNotifications } = require('./engine');
+const { buildCodexCompletionDedupeKey } = require('./codex-hook');
 const { buildGeminiCompletionDedupeKey, getClaudeSessionOrigin, looksLikeClaudeFailure } = require('./hook-context');
 
 function parseTimestamp(value) {
@@ -1169,7 +1170,10 @@ function startCodexWatchSessions({ intervalMs, log, confirmDetector, failureCont
   async function sendCodexSessionCompletion(candidate) {
     if (!candidate || !candidate.notification) return false;
 
-    const result = await sendNotifications(candidate.notification);
+    const result = await sendNotifications({
+      ...candidate.notification,
+      dedupeKey: buildCodexCompletionDedupeKey(candidate.state?.sessionId, candidate.turnId || candidate.state?.currentTurnId) || undefined,
+    });
     if (candidate.state) {
       candidate.state.lastNotifiedAssistantAt = candidate.assistantAt;
       if (candidate.turnId) candidate.state.lastNotifiedTurnId = candidate.turnId;

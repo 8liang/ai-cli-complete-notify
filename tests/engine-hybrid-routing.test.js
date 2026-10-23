@@ -7,7 +7,7 @@ const {
   getGeminiHookNotificationContext,
 } = require('../src/hook-context');
 
-test('hybrid mode keeps Codex watch and OpenCode plugin notifications', () => {
+test('hybrid mode keeps Codex watch fallback, Codex hooks and OpenCode plugin notifications', () => {
   assert.equal(
     shouldSkipByNotificationMode({ sourceName: 'codex', fromHook: false, notificationMode: 'hooks' }),
     null,
@@ -27,6 +27,18 @@ test('hybrid mode keeps Codex watch and OpenCode plugin notifications', () => {
 });
 
 test('watch-only mode suppresses Claude/Gemini hooks but keeps watch and OpenCode', () => {
+  const skippedCodex = shouldSkipByNotificationMode({
+    sourceName: 'codex',
+    fromHook: true,
+    notificationMode: 'watch',
+  });
+  assert.ok(skippedCodex && skippedCodex.skipped);
+  assert.match(String(skippedCodex.reason), /notificationMode is watch/i);
+  assert.equal(
+    shouldSkipByNotificationMode({ sourceName: 'codex', fromHook: false, notificationMode: 'watch' }),
+    null,
+  );
+
   const skippedClaude = shouldSkipByNotificationMode({
     sourceName: 'claude',
     fromHook: true,

@@ -45,7 +45,7 @@ An intelligent task completion notification tool for Claude Code / Codex / OpenC
 - 🔀 **Source Control**: Independent enable/disable and threshold settings for Claude / Codex / OpenCode / Gemini / ZCode
 - 📡 **Multi-Channel Push**: Support multiple notification methods simultaneously to ensure message delivery
 - ⏱️ **Duration Threshold**: Only notify when tasks exceed the set duration to avoid frequent interruptions
-- 🪝 **Hooks + Watch Integration**: Claude Code / Gemini CLI / ZCode can use native hooks, OpenCode can use a global plugin, while Codex continues through log watching
+- 🪝 **Hooks + Watch Integration**: Claude Code / Codex / Gemini CLI / ZCode can use native hooks, OpenCode can use a global plugin, and Watch remains available as a fallback
 - 🧠 **AI Summary (Optional)**: Generate a short summary quickly; fallback to the original task if it times out
 - 🖥️ **Desktop Application**: GUI configuration with language switching, tray hiding, and auto-start
 - 🔐 **Configuration Separation**: Runtime configuration separated from sensitive information for security
@@ -64,15 +64,15 @@ Benefits:
 
 - Claude Code often splits a request into sub-tasks. To avoid spam, this tool only notifies after the whole turn completes.
 - Log monitoring relies on a quiet period to confirm completion, so notifications are not instant (default 60s with tool calls, 15s without).
-- For the fastest and cleanest alerts, prefer Hooks for Claude Code / Gemini CLI / ZCode and the global plugin for OpenCode; keep Watch for Codex or as a general fallback mode.
-- Watch and Hooks **can run together in hybrid mode**. Recommended hybrid setup: Codex uses Watch; Claude Code / Gemini / OpenCode / ZCode use Hooks or plugins. If both paths fire for the same source, content-based dedupe keeps only one alert. **Watch-only** mode suppresses Claude/Gemini installed hooks so the two options stay distinct; hook-only sources (OpenCode, Herdr, ZCode) are never silenced by it.
+- For faster completion alerts, prefer Hooks for Claude Code / Codex / Gemini CLI / ZCode and the global plugin for OpenCode. Codex requires a client version with native hook support and explicit hook trust; use Watch for clients without native hook support or with hooks disabled; hybrid mode keeps Watch as a fallback.
+- Watch and Hooks **can run together in hybrid mode**. Recommended hybrid setup: Claude Code / Codex / Gemini / OpenCode / ZCode use Hooks or plugins, with Watch running as a fallback where available. Codex Hook and Watch use the same session/turn key to deduplicate completion alerts; other sources keep their existing content-based deduplication. **Watch-only** mode suppresses installed Claude/Codex/Gemini hooks so the two options stay distinct; hook-only sources (OpenCode, Herdr, ZCode) are never silenced by it.
 
 ## Hooks vs Watch
 
-- **Hooks / plugin events** use explicit lifecycle events emitted by the AI CLI itself. For Claude Code, Gemini CLI, OpenCode, and ZCode, that means reminders can fire closer to the real finish point instead of waiting for a quiet-period guess.
+- **Hooks / plugin events** use explicit lifecycle events emitted by the AI CLI itself. For Claude Code, supported Codex clients, Gemini CLI, OpenCode, and ZCode, that means reminders can fire closer to the real finish point instead of waiting for a quiet-period guess.
 - **Hooks** do not require a long-running background watcher for those tools, which reduces idle overhead and lowers the chance of log-parsing false positives.
-- **Watch** remains the universal fallback. It works well for Codex and for cases where hooks are not configured, but it depends on local logs and debounce time to infer that a turn has ended.
-- In practice, Hooks / plugin events were added because Claude Code's `Stop`, ZCode's `Stop`, Gemini CLI's `AfterAgent`, and OpenCode's `session.status` idle / `session.idle` / `session.error` events provide more timely and accurate completion signals than watch-based log polling. In the current integration, Codex still uses Watch as the main completion path.
+- **Watch** remains the universal fallback. It supports Codex clients without native hook support or with hooks disabled or unconfigured, but it depends on local logs and debounce time to infer that a turn has ended.
+- In practice, Hooks / plugin events were added because Claude Code's `Stop`, Codex's `Stop`, ZCode's `Stop`, Gemini CLI's `AfterAgent`, and OpenCode's `session.status` idle / `session.idle` / `session.error` events provide more timely and accurate completion signals than watch-based log polling. Codex can use native hooks when the client supports them; Watch remains available as a fallback.
 
 ## 🚀 Quick Start
 
@@ -243,7 +243,7 @@ Notes:
 node ai-reminder.js notify --source claude --task "Task completed"
 ```
 
-### Native Hooks / Plugin Mode (Recommended for Claude Code / Gemini CLI / OpenCode / ZCode)
+### Native Hooks / Plugin Mode (Recommended for Claude Code / Codex / Gemini CLI / OpenCode / ZCode)
 
 ```bash
 # Check current hook status
@@ -251,6 +251,14 @@ node ai-reminder.js hooks status
 
 # Install Claude Code hook
 node ai-reminder.js hooks install --target claude
+
+# Install Codex hooks (user-level; review / trust in Codex /hooks afterwards)
+node ai-reminder.js hooks install --target codex
+
+# Check, preview or uninstall Codex hooks
+node ai-reminder.js hooks status --target codex
+node ai-reminder.js hooks preview --target codex
+node ai-reminder.js hooks uninstall --target codex
 
 # Install Gemini CLI hook
 node ai-reminder.js hooks install --target gemini
@@ -280,7 +288,8 @@ Notes:
 - Enable the ZCode source, install its hook under **Hooks / Plugin Integration**, then start a new ZCode session. `UserPromptSubmit` starts the timer and `Stop` checks the duration threshold: `0` allows a notification on every completed turn; a positive value requires at least that many minutes. With a positive threshold, no notification is sent if the start time is missing. Reinstall the hook when upgrading from a Stop-only installation. ZCode channel preferences can be changed independently; delivery still requires the corresponding global channel to be enabled and configured.
 - After installing or updating the ZCode hooks, **fully quit ZCode, reopen it, and start a new session** instead of continuing a session created before installation. Existing sessions may retain the hook configuration loaded at startup. If Test Notification succeeds but real tasks stay silent, confirm that the ZCode source and target channel are enabled, temporarily set the threshold to `0`, and test in a new session after restarting. Test Notification sends directly and bypasses the duration threshold; it does not verify actual hook execution.
 - Herdr installs the [`herdr-ai-notify`](https://github.com/8liang/herdr-ai-notify) plugin through `herdr plugin install`, listens to `pane.agent_status_changed` (`done` / `blocked`), and writes `AI_REMINDER_PATH` into the plugin's `config.env` (auto-detected from the current executable path). Herdr notifications use their own `herdr` source, so titles are prefixed `[Herdr]` and its channels are configured separately (see `sources.herdr`). The community plugin forces delivery, so duration thresholds do not filter these events.
-- In the current integration, Codex completion reminders are still handled mainly through Watch mode.
+- Codex installation registers `UserPromptSubmit` and `Stop` command hooks in `CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`), preserving existing settings and other hooks. `UserPromptSubmit` starts timing and `Stop` checks the configured duration threshold; `0` allows each completed turn to notify. Uninstall removes only this tool's handlers.
+- **Configured does not mean active:** after installing or updating, open `/hooks` in a Codex client with native hook support, review / trust the new definitions, and ensure hooks are enabled. This installer does not change Codex trust decisions or enable a disabled hooks runner. Not every Codex client supports native hooks; use Watch for clients without native hook support or with hooks disabled; hybrid mode keeps Watch as a fallback.
 
 ### Optional third-party tools (Herdr)
 
@@ -545,7 +554,7 @@ macOS notes:
 - 🎯 **Smart debouncing** automatically adjusts wait time based on AI message type, improving notification accuracy
 - 💡 **Monitoring mode** is suitable for long-term operation, recommend setting auto-start or keeping it running in a background terminal
 - 💡 **EXE starts with Watch enabled by default**: toggle it in the top bar if you don?t need it.
-- 🪝 **Hooks / plugin mode** is the preferred choice for Claude Code / Gemini CLI / OpenCode / ZCode because it uses explicit completion events. Hybrid mode is recommended: keep Watch on for Codex while Claude / Gemini / OpenCode / ZCode use hooks or plugins.
+- 🪝 **Hooks / plugin mode** uses explicit completion events for Claude Code / supported Codex clients / Gemini CLI / OpenCode / ZCode. Hybrid mode is recommended: use hooks or plugins and keep Watch as a fallback; Codex hooks require review / trust in `/hooks` and an enabled hooks runner.
 - ✅ **Confirm prompt toggle guidance (default: OFF)**: turn it on if AI often asks “confirm/approve/continue”; keep it off if you only want final completion alerts without intermediate interruptions. Note: if you set `CODEX_COMPLETION_ONLY=1` in `.env`, Codex confirm alerts are disabled (set it to `0` or remove it).
 - 🧭 **Click to return** is more reliable but still best-effort due to OS focus rules; for VSCode extensions choose the VSCode target and ensure VSCode is not minimized
 
@@ -560,7 +569,13 @@ macOS notes:
 ### 2.18.0
 
 - Added Windows desktop notifications for WSL CLI and Hook runs by reusing the existing Windows PowerShell toast/balloon path. No external network, MCP, or background service is required; pure Linux remains unchanged.
-
+- Added native Codex hooks for [Issue #41](https://github.com/ZekerTop/ai-cli-complete-notify/issues/41), with a Codex card in **Hooks / Plugin Integration** and CLI install, uninstall, status and preview commands. Definitions are written to `CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`) while preserving other hooks.
+- `UserPromptSubmit` records the start time and `Stop` checks the configured duration threshold. Timing is isolated by session and turn; `0` allows each completed turn to notify, while a positive threshold requires a recorded duration.
+- Codex Hook and Watch completion events share session/turn deduplication. Transcript metadata filters explicit subagent sessions and intermediate completions while a goal is `active` or `paused`.
+- Configured does not mean executing: after installing or updating, review / trust the definitions in Codex `/hooks` and ensure hooks are enabled. Hybrid mode keeps Watch as a fallback; clients without native hook support or with hooks disabled can continue using Watch. Watch-only mode also suppresses Codex hooks.
+- Concurrent Codex Hook/Watch candidates use an atomic claim for the same session/turn. If the first attempt fails on every channel, a later candidate can take over, so a failed attempt does not block Watch fallback.
+- When the transcript provides an explicit `task_complete` timestamp, asynchronous `Stop` handling uses that completion time for the duration threshold, rather than counting processing delay as task runtime.
+- Fixed macOS DMG packaging compatibility with `LC_ALL`, retaining the standard drag-to-Applications installation layout.
 
 ### 2.17.0
 

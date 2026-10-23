@@ -18,6 +18,7 @@ const {
   getOpenCodeHookNotificationContext,
   getZcodeHookNotificationContext,
 } = require('./hook-context');
+const { getCodexHookNotificationContext } = require('./codex-hook');
 const { exec, spawn } = require('child_process');
 const path = require('path');
 
@@ -42,9 +43,9 @@ function printHelp() {
   ${invoke} paths
   ${invoke} env-status [--create-example]
   ${invoke} hooks  status    [--target herdr]
-  ${invoke} hooks  install   --target claude|gemini|opencode|herdr|zcode
-  ${invoke} hooks  uninstall --target claude|gemini|opencode|herdr|zcode
-  ${invoke} hooks  preview   --target claude|gemini|opencode|herdr|zcode
+  ${invoke} hooks  install   --target claude|codex|gemini|opencode|herdr|zcode
+  ${invoke} hooks  uninstall --target claude|codex|gemini|opencode|herdr|zcode
+  ${invoke} hooks  preview   --target claude|codex|gemini|opencode|herdr|zcode
   ${invoke} config
 
 说明:
@@ -52,7 +53,7 @@ function printHelp() {
   - 阈值提醒建议使用 start/stop（自动计算耗时）
   - 最省事的接入方式是 run：由 ${PRODUCT_NAME} 负责计时并在命令结束后提醒
   - 交互式 / VSCode 插件场景建议使用 watch：自动监听本机日志并在每次回复完成后提醒（Claude / Codex / Gemini）
-  - hooks：Claude Code / Gemini CLI 使用原生 hooks；OpenCode 通过全局 plugin 接收 session.status idle / session.idle / session.error 事件；Herdr 通过 herdr plugin install 安装 herdr-ai-notify 插件并写入 AI_REMINDER_PATH 配置；ZCode 通过用户级 config.json 注册 UserPromptSubmit / Stop process hooks（安装后完全退出 ZCode 并新建会话）
+  - hooks：Claude Code / Codex / Gemini CLI 使用原生 hooks；Codex 安装后请在 /hooks 中审核并信任配置，保持 hooks 功能开启；OpenCode 通过全局 plugin 接收 session.status idle / session.idle / session.error 事件；Herdr 通过 herdr plugin install 安装 herdr-ai-notify 插件并写入 AI_REMINDER_PATH 配置；ZCode 通过用户级 config.json 注册 UserPromptSubmit / Stop process hooks（安装后完全退出 ZCode 并新建会话）
 
 配置:
   - settings: ${getConfigPath()}
@@ -76,7 +77,7 @@ function sleep(ms) {
 }
 
 function isValidHookTarget(target) {
-  return target === 'claude' || target === 'gemini' || target === 'opencode' || target === 'herdr' || target === 'zcode';
+  return target === 'claude' || target === 'codex' || target === 'gemini' || target === 'opencode' || target === 'herdr' || target === 'zcode';
 }
 
 async function runCli(argv) {
@@ -226,7 +227,7 @@ async function runCli(argv) {
 
     if (subCommand === 'install') {
       if (!isValidHookTarget(target)) {
-        console.error('请指定 --target claude / gemini / opencode / herdr / zcode');
+        console.error('请指定 --target claude / codex / gemini / opencode / herdr / zcode');
         return { ok: false, mode: 'hooks', error: 'Missing or invalid --target' };
       }
       const result = installHook(target);
@@ -234,13 +235,14 @@ async function runCli(argv) {
         console.log(JSON.stringify({ ok: result.ok, step: result.step, errorCode: result.errorCode }));
       } else {
         console.log(result.ok ? `已安装 ${target} 集成 -> ${result.settingsPath}` : `安装失败: ${result.error}`);
+        if (result.ok && target === 'codex') console.log('请在 Codex 的 /hooks 中审核并信任新增 hooks；如已关闭 hooks 功能，请自行开启。');
       }
       return { ok: result.ok, mode: 'hooks', subCommand: 'install', result };
     }
 
     if (subCommand === 'uninstall') {
       if (!isValidHookTarget(target)) {
-        console.error('请指定 --target claude / gemini / opencode / herdr / zcode');
+        console.error('请指定 --target claude / codex / gemini / opencode / herdr / zcode');
         return { ok: false, mode: 'hooks', error: 'Missing or invalid --target' };
       }
       const result = uninstallHook(target);
@@ -353,14 +355,18 @@ async function runCli(argv) {
     // Keep diagnostics off stdout; Gemini expects a JSON response below.
     const isZcodeHook = fromHook && source === 'zcode';
     const isGeminiHook = fromHook && source === 'gemini';
-    const silentStdoutHook = isZcodeHook || isGeminiHook;
+    const isCodexHook = fromHook && source === 'codex';
+    const silentStdoutHook = isZcodeHook || isGeminiHook || isCodexHook;
     const originalLog = console.log;
+    const desktopStdout = process.env.AI_CLI_COMPLETE_NOTIFY_DESKTOP_STDOUT;
     const durationMinutes = toNumberOrNull(flags['duration-minutes']);
     const durationMs = durationMinutes != null ? durationMinutes * 60 * 1000 : toNumberOrNull(flags['duration-ms']);
 
     if (silentStdoutHook) {
       console.log = (...args) => console.error(...args);
     }
+    // Hook stdout belongs to Codex, not the Tauri notification bridge.
+    if (isCodexHook) process.env.AI_CLI_COMPLETE_NOTIFY_DESKTOP_STDOUT = '0';
 
     try {
       let hookContext = null;
@@ -380,7 +386,9 @@ async function runCli(argv) {
         ? loadConfig()?.sources?.claude?.onlyInteractive !== false
         : false;
       const hookNotificationContext =
-        fromHook && source === 'claude'
+        isCodexHook
+          ? getCodexHookNotificationContext(hookContext, effectiveTask)
+          : fromHook && source === 'claude'
           ? getClaudeHookNotificationContext(hookContext, effectiveTask, { onlyInteractive: claudeOnlyInteractive })
           : fromHook && source === 'gemini'
             ? getGeminiHookNotificationContext(hookContext, effectiveTask)
@@ -409,9 +417,9 @@ async function runCli(argv) {
       const result = await sendNotifications({
         source,
         taskInfo: hookNotificationContext?.taskInfo || effectiveTask,
-        durationMs: isZcodeHook ? zcodeTiming?.durationMs : durationMs,
+        durationMs: isCodexHook ? hookNotificationContext?.durationMs : isZcodeHook ? zcodeTiming?.durationMs : durationMs,
         cwd: effectiveCwd,
-        force: !isZcodeHook && Boolean(flags.force),
+        force: !isZcodeHook && !isCodexHook && Boolean(flags.force),
         fromHook,
         outputContent: hookNotificationContext?.outputContent,
         summaryContext: hookNotificationContext?.summaryContext,
@@ -423,9 +431,13 @@ async function runCli(argv) {
       printResult(result);
       return { ok: true, mode: 'notify', result };
     } finally {
+      if (isCodexHook) {
+        if (desktopStdout == null) delete process.env.AI_CLI_COMPLETE_NOTIFY_DESKTOP_STDOUT;
+        else process.env.AI_CLI_COMPLETE_NOTIFY_DESKTOP_STDOUT = desktopStdout;
+      }
       if (silentStdoutHook) {
         console.log = originalLog;
-        if (isGeminiHook) {
+        if (isGeminiHook || isCodexHook) {
           originalLog('{}');
         }
       }

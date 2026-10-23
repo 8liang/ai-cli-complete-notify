@@ -45,7 +45,7 @@ AI CLI Complete Notify 是面向 Claude Code / Codex / OpenCode / Gemini / ZCode
 - 🔀 **來源控制**：Claude / Codex / OpenCode / Gemini / ZCode 可分別設定啟用狀態、耗時閾值與通知通道。
 - 📡 **多通道推送**：Webhook、Telegram、Email、桌面通知與聲音可以同時啟用。
 - ⏱️ **耗時閾值**：只在任務超過指定時長後提醒，避免頻繁打擾。
-- 🪝 **Hooks + Watch 混合模式**：Claude Code / Gemini CLI / ZCode 可使用原生 Hook，OpenCode 可使用全域插件事件，Codex 仍以日誌監聽為主。
+- 🪝 **Hooks + Watch 混合模式**：Claude Code / Codex / Gemini CLI / ZCode 可使用原生 Hook，OpenCode 可使用全域插件事件，Watch 保留備援。
 - 🧠 **AI 摘要（可選）**：任務完成後產生短摘要，逾時或失敗時會回退到原始內容。
 - 🖥️ **桌面應用**：圖形化配置、語言切換、隱藏到托盤 / macOS 選單列、開機自啟。
 - 🔐 **設定分離**：執行設定與敏感憑證分離，`.env` 優先保存 Token、Webhook、Email 等資訊。
@@ -60,13 +60,14 @@ AI CLI Complete Notify 是面向 Claude Code / Codex / OpenCode / Gemini / ZCode
 
 - Claude Code 經常會把一個請求拆成多個子任務。為避免每個子任務都提醒，本工具只在整輪完成後發送提醒。
 - Watch 模式依賴日誌變化，需要一段去抖靜默時間確認結束，因此提醒不是即時觸發。
-- 若想要更快、更準確的提醒：Claude Code / Gemini CLI / ZCode 優先使用 Hook，OpenCode 優先使用全域插件，Codex 或兜底場景繼續使用 Watch。
+- 若想要更快、更準確的提醒：Claude Code / Codex / Gemini CLI / ZCode 優先使用 Hook，OpenCode 優先使用全域插件。Codex 需用戶端版本支援原生 hooks 並完成信任；未支援或未啟用原生 hooks 的用戶端繼續使用 Watch；混合模式保留 Watch 備援。
+- 混合模式可同時使用 Hook 與 Watch，並對同一完成事件去重。「僅 Watch」會屏蔽 Claude/Codex/Gemini hooks；OpenCode、Herdr、ZCode 等僅走 Hook／插件的來源不受影響。
 
 ## Hooks 與 Watch 的差異
 
-- **Hook / 插件事件** 直接使用 AI CLI 自身發出的生命週期事件（例如 Claude Code / ZCode 的 `Stop`、Gemini CLI 的 `AfterAgent`、OpenCode 的 `session.status` idle），完成時機更接近真實狀態。
+- **Hook / 插件事件** 直接使用 AI CLI 自身發出的生命週期事件（例如 Claude Code / Codex / ZCode 的 `Stop`、Gemini CLI 的 `AfterAgent`、OpenCode 的 `session.status` idle），完成時機更接近真實狀態。
 - **Hook** 不需要為對應工具長期常駐背景監聽器，空閒開銷更低。
-- **Watch** 是通用兜底方案，適合 Codex，也適合尚未配置 Hook 的場景。
+- **Watch** 是通用兜底方案，適合未支援或未啟用原生 hooks 的 Codex 用戶端，也適合尚未設定 Hook 的場景。
 
 ## 🚀 快速開始
 
@@ -182,6 +183,14 @@ node ai-reminder.js hooks status
 # 安裝 Claude Code Hook
 node ai-reminder.js hooks install --target claude
 
+# 安裝 Codex Hook（使用者層級；之後需在 Codex /hooks 中 review / trust）
+node ai-reminder.js hooks install --target codex
+
+# 查看、預覽或解除安裝 Codex Hook
+node ai-reminder.js hooks status --target codex
+node ai-reminder.js hooks preview --target codex
+node ai-reminder.js hooks uninstall --target codex
+
 # 安裝 Gemini CLI Hook
 node ai-reminder.js hooks install --target gemini
 
@@ -194,6 +203,8 @@ node ai-reminder.js hooks install --target herdr
 # 安裝 ZCode Hook（使用者層級；自動啟用 ZCode 的 hooks runner）
 node ai-reminder.js hooks install --target zcode
 ```
+
+Codex 會在 `CODEX_HOME/hooks.json`（預設 `~/.codex/hooks.json`）註冊 `UserPromptSubmit` 與 `Stop` command hooks，保留其他 Hook 與既有設定；解除安裝僅移除本工具的處理器。`UserPromptSubmit` 開始計時，`Stop` 檢查耗時閾值，`0` 表示每輪完成皆可提醒。**已設定不代表已啟用**：安裝或更新後，須在支援原生 hooks 的 Codex 中開啟 `/hooks`，review / trust 新定義，並確認 hooks 已開啟。安裝器不會修改信任決定或開啟已關閉的 hooks runner。未支援或未啟用原生 hooks 的 Codex 用戶端繼續使用 Watch；混合模式保留 Watch 備援。
 
 ZCode 僅使用 Hook，沒有 Watch 路徑，來源預設關閉（`sources.zcode.enabled`）。安裝會在使用者層級的 `~/.zcode/cli/config.json` 註冊 `UserPromptSubmit` 與 `Stop` 兩個 process Hook，並啟用 `hooks.enabled`；保留其他 Hook 與既有設定，解除安裝僅移除本工具的處理器。
 啟用 ZCode 來源後，在「Hooks / 插件整合」安裝 ZCode Hook，再建立新的 ZCode 工作階段。`UserPromptSubmit` 開始計時，`Stop` 檢查耗時閾值：`0` 表示每輪完成皆可提醒，正數表示至少執行相應分鐘數；沒有開始時間記錄時，正數閾值下不會傳送提醒。舊版僅安裝 `Stop` 的使用者需重新安裝 Hook。ZCode 管道偏好可獨立調整，實際傳送仍要求對應全域管道已啟用並完成設定。
@@ -329,7 +340,7 @@ macOS 建議：
 - `notify` 會忽略耗時閾值並直接發送提醒。
 - Webhook 預設使用飛書 post 格式；企業微信 / 釘釘會自動使用文字格式。
 - 手環 / 手錶提醒通常透過手機通知同步、Webhook 中轉、Telegram 或 Email 間接實現。
-- Hooks / 插件模式較適合 Claude Code / Gemini CLI / OpenCode / ZCode；Watch 主要保留給 Codex 或兜底場景。
+- Hooks / 插件模式適合 Claude Code / 支援原生 hooks 的 Codex 用戶端 / Gemini CLI / OpenCode / ZCode；建議混合模式並保留 Watch 備援。Codex 需在 `/hooks` review / trust 並開啟 hooks。
 
 ## 版本歷史
 
@@ -342,7 +353,13 @@ macOS 建議：
 ### 2.18.0
 
 - 新增 WSL CLI 與 Hook 呼叫 Windows 桌面通知：沿用既有 Windows PowerShell toast/balloon 流程，不需要外網、MCP 或額外常駐服務；純 Linux 行為維持不變。
-
+- 支援 [Issue #41](https://github.com/ZekerTop/ai-cli-complete-notify/issues/41) 提出的 Codex 原生 hooks：「Hooks / 插件整合」新增 Codex 卡片，CLI 支援安裝、解除安裝、狀態與預覽。定義寫入 `CODEX_HOME/hooks.json`（預設 `~/.codex/hooks.json`），保留其他 Hook。
+- `UserPromptSubmit` 記錄開始時間，`Stop` 檢查設定的耗時閾值；計時依 session 與 turn 隔離。閾值為 `0` 時每輪完成皆可提醒，正數閾值需要有效的耗時記錄。
+- Codex Hook 與 Watch 共用 session / turn 完成去重；依 transcript 中繼資料過濾明確的 subagent 工作階段，以及 goal 為 `active` 或 `paused` 時的中間完成事件。
+- 已設定不代表實際執行：安裝或更新後，須在 Codex `/hooks` 中 review / trust 新定義並確認 hooks 已開啟。混合模式保留 Watch 備援；未支援或未啟用原生 hooks 的用戶端繼續使用 Watch。「僅 Watch」模式也會屏蔽 Codex hooks。
+- Codex Hook / Watch 並發候選使用原子佔位，對同一 session / turn 去重；首次傳送的所有管道失敗時，後續候選可接手，避免失敗記錄擋住 Watch 補送。
+- 非同步 `Stop` 在 transcript 提供明確的 `task_complete` 時間時，以實際完成時間計算耗時閾值，避免處理延遲把短任務視為長任務。
+- 修復 macOS DMG 打包的 `LC_ALL` 環境相容問題，保留將應用程式拖入 Applications 的標準安裝配置。
 
 ### 2.17.0
 

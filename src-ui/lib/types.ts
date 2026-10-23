@@ -108,6 +108,7 @@ export interface AppConfig {
 
 export interface HookStatus {
   claude: { installed: boolean; settingsPath: string };
+  codex: { installed: boolean; settingsPath: string };
   gemini: { installed: boolean; settingsPath: string };
   opencode: { installed: boolean; settingsPath: string };
   zcode: { installed: boolean; hooksEnabled: boolean; settingsPath: string };

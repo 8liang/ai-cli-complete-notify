@@ -22,6 +22,7 @@ interface Props {
 
 const TARGETS: { key: HookTarget; title: string; descKey: string }[] = [
   { key: 'claude', title: 'Claude Code', descKey: 'hooks.claude.desc' },
+  { key: 'codex', title: 'Codex', descKey: 'hooks.codex.desc' },
   { key: 'gemini', title: 'Gemini CLI', descKey: 'hooks.gemini.desc' },
   { key: 'zcode', title: 'ZCode', descKey: 'hooks.zcode.desc' },
   { key: 'opencode', title: 'OpenCode', descKey: 'hooks.opencode.desc' },
@@ -41,12 +42,14 @@ export default function HooksPanel({ config, onUpdate, hooks, onHooksStatusChang
   const [previewTarget, setPreviewTarget] = useState<HookTarget>('claude');
   const [messages, setMessages] = useState<Record<HookTarget, string>>({
     claude: '',
+    codex: '',
     gemini: '',
     opencode: '',
     zcode: '',
   });
   const [loading, setLoading] = useState<Record<HookTarget, boolean>>({
     claude: false,
+    codex: false,
     gemini: false,
     opencode: false,
     zcode: false,
@@ -69,6 +72,7 @@ export default function HooksPanel({ config, onUpdate, hooks, onHooksStatusChang
     if (!status) return;
     const uninstalled: string[] = [];
     if (!status.claude?.installed) uninstalled.push('Claude Code');
+    if (!status.codex?.installed) uninstalled.push('Codex');
     if (!status.gemini?.installed) uninstalled.push('Gemini CLI');
     if (!status.opencode?.installed) uninstalled.push('OpenCode');
     onHooksStatusChange(uninstalled);
@@ -185,6 +189,9 @@ export default function HooksPanel({ config, onUpdate, hooks, onHooksStatusChang
                 </div>
               </div>
               <div className="text-xs text-muted mb-1">{t(target.descKey)}</div>
+              {target.key === 'codex' && (
+                <div className="text-xs text-muted mb-2 leading-relaxed">{t('hooks.codex.trustHint')}</div>
+              )}
               {info?.settingsPath && (
                 <div className="text-[11px] text-muted break-all mb-2">{info.settingsPath}</div>
               )}

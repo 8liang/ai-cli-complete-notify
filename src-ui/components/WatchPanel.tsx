@@ -54,12 +54,14 @@ export default function WatchPanel({ config, onUpdate, watch }: Props) {
 
       const hookStatus = JSON.parse(stdout || '{}') as {
         claude?: { installed: boolean };
+        codex?: { installed: boolean };
         gemini?: { installed: boolean };
         opencode?: { installed: boolean };
       };
 
       const uninstalled: string[] = [];
       if (hookStatus.claude && !hookStatus.claude.installed) uninstalled.push('Claude Code');
+      if (hookStatus.codex && !hookStatus.codex.installed) uninstalled.push('Codex');
       if (hookStatus.gemini && !hookStatus.gemini.installed) uninstalled.push('Gemini CLI');
 
       if (uninstalled.length === 0) return true;

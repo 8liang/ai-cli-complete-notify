@@ -283,7 +283,7 @@ test('zcode appears in CLI help and in the valid hook targets', (t) => {
     encoding: 'utf8'
   });
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /--target claude\|gemini\|opencode\|herdr\|zcode/);
+  assert.match(help.stdout, /--target claude\|codex\|gemini\|opencode\|herdr\|zcode/);
   assert.match(help.stdout, /claude \/ codex \/ opencode \/ gemini \/ herdr \/ zcode/);
 
   const invalid = runHooks(sb, 'install', '--target', 'nope');

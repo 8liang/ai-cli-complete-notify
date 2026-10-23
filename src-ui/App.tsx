@@ -151,6 +151,7 @@ export default function App() {
       if (cfg && cfg.ui.notificationMode === 'hooks' && hookStatus) {
         const uninstalled: string[] = [];
         if (!hookStatus.claude?.installed) uninstalled.push('Claude Code');
+        if (!hookStatus.codex?.installed) uninstalled.push('Codex');
         if (!hookStatus.gemini?.installed) uninstalled.push('Gemini CLI');
         if (!hookStatus.opencode?.installed) uninstalled.push('OpenCode');
         if (uninstalled.length > 0) {

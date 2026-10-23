@@ -10,6 +10,7 @@ const { notifyGotify } = require('./notifiers/gotify');
 const { summarizeTaskDetailed } = require('./summary');
 const { focusTarget } = require('./focus');
 const { checkAndRememberNotification } = require('./state');
+const { acquireCodexNotificationClaim } = require('./codex-notification-claim');
 
 const NOTIFICATION_DEDUPE_MS = Math.max(30 * 1000, Number(process.env.NOTIFICATION_DEDUPE_MS || 2 * 60 * 1000));
 
@@ -69,16 +70,15 @@ function buildSummaryDiagnostics(result, skipped) {
 
 function shouldSkipByNotificationMode({ sourceName, fromHook, notificationMode }) {
   const mode = notificationMode === 'hooks' ? 'hooks' : 'watch';
-  const hookCapable = sourceName === 'claude' || sourceName === 'gemini';
+  const hookCapable = sourceName === 'claude' || sourceName === 'codex' || sourceName === 'gemini';
 
-  // Codex has no hooks path and always uses watch.
   // OpenCode / Herdr / ZCode have no watch path and always use hooks, so a
   // mode meant to gate log polling must never silence their only signal.
-  if (sourceName === 'codex' || sourceName === 'opencode' || sourceName === 'herdr' || sourceName === 'zcode') {
+  if (sourceName === 'opencode' || sourceName === 'herdr' || sourceName === 'zcode') {
     return null;
   }
 
-  // Watch-only mode means log polling for Claude/Gemini too: suppress their
+  // Watch-only mode means log polling for Claude/Codex/Gemini: suppress their
   // installed hooks so the mode option keeps a distinct engine meaning.
   // Hybrid ("hooks") mode allows both paths; content-based dedupe later
   // collapses same-completion duplicates, and watch remains a real fallback
@@ -105,8 +105,8 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
     return { skipped: true, reason: `source ${sourceName} disabled`, results: [] };
   }
 
-  // Hybrid ("hooks") keeps Codex on watch while Claude/Gemini/OpenCode can use
-  // hooks/plugins. Watch-only suppresses Claude/Gemini hooks so the two modes
+  // Hybrid ("hooks") allows hooks/plugins with watch as a fallback.
+  // Watch-only suppresses Claude/Codex/Gemini hooks so the two modes
   // stay distinct. Cross-path duplicates still rely on content-based dedupe.
   const notificationMode = (config.ui && config.ui.notificationMode) || 'hooks';
   const modeSkip = shouldSkipByNotificationMode({
@@ -138,16 +138,23 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
       || ''
   ).trim();
 
+  let codexClaim = null;
   if (!skipDedupe && dedupeText) {
-    const duplicated = checkAndRememberNotification({
-      source: sourceName,
-      // Explicit dedupe keys are content-scoped (e.g. Gemini hook/watch) and
-      // must ignore cwd — GUI watch cwd often differs from the project cwd in
-      // the hook payload, which would otherwise break cross-path dedupe.
-      cwd: explicitDedupeKey ? '' : cwdToUse,
-      text: dedupeText,
-      dedupeMs: NOTIFICATION_DEDUPE_MS,
-    });
+    let duplicated;
+    if (sourceName === 'codex' && explicitDedupeKey.startsWith('codex-complete:')) {
+      codexClaim = await acquireCodexNotificationClaim(explicitDedupeKey, { dedupeMs: NOTIFICATION_DEDUPE_MS });
+      duplicated = !codexClaim;
+    } else {
+      duplicated = checkAndRememberNotification({
+        source: sourceName,
+        // Explicit dedupe keys are content-scoped (e.g. Gemini hook/watch) and
+        // must ignore cwd — GUI watch cwd often differs from the project cwd in
+        // the hook payload, which would otherwise break cross-path dedupe.
+        cwd: explicitDedupeKey ? '' : cwdToUse,
+        text: dedupeText,
+        dedupeMs: NOTIFICATION_DEDUPE_MS,
+      });
+    }
     if (duplicated) {
       return {
         skipped: true,
@@ -157,168 +164,174 @@ async function sendNotifications({ source, taskInfo, durationMs, cwd, projectNam
     }
   }
 
-  const durationText = formatDurationMs(durationMs);
-  const timestamp = new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' });
-  const statusLine = kind === 'error' ? 'Failed at' : kind === 'confirm' ? 'Alert at' : 'Completed at';
-  const resolvedOutput = String(
-    outputContent
-      || (summaryContext && summaryContext.assistantMessage)
-      || ''
-  );
-  const lines = [
-    `${statusLine}: ${timestamp}`,
-    durationText ? `Duration: ${durationText}` : null,
-    `Source: ${sourceLabel}`
-  ].filter(Boolean);
-  const contentText = lines.join('\n');
-  const tasks = [];
-  const results = [];
-
-  // Start summary generation immediately (don't await yet)
-  const summaryPromise = skipSummary
-    ? Promise.resolve(null)
-    : summarizeTaskDetailed({ config, taskInfo, contentText, summaryContext })
-      .catch((error) => ({
-        ok: false,
-        error: error && error.message ? error.message : String(error)
-      }));
-
-  // Add desktop notification task immediately (uses original taskInfo, doesn't need summary)
-  if (isChannelEnabled(config, 'desktop', sourceName)) {
-    const focusEnabled = Boolean(config?.ui?.autoFocusOnNotify);
-    const focusTargetKey = String(config?.ui?.focusTarget || 'auto');
-    const lang = String(config?.ui?.language || 'zh-CN');
-    const targetLabel = focusTargetKey === 'vscode'
-      ? 'VSCode'
-      : focusTargetKey === 'terminal'
-        ? (lang === 'en' ? 'terminal' : '命令行')
-        : (lang === 'en' ? 'workspace' : '工作界面');
-    const notifyLabel = kind === 'confirm'
-      ? (lang === 'en' ? 'Confirmation needed' : '确认提醒')
-      : kind === 'error'
-        ? (lang === 'en' ? 'Task failed' : '任务失败')
-      : (lang === 'en' ? 'Task completed' : '任务完成');
-    const clickHint = focusEnabled
-      ? (lang === 'en' ? `Return to ${targetLabel}` : `点击返回${targetLabel}`)
-      : '';
-    const desktopTitle = kind === 'confirm'
-      ? notifyLabel
-      : kind === 'error'
-        ? String(taskInfo || notifyLabel)
-      : String(taskInfo || notifyLabel);
-    const desktopMessage = kind === 'confirm'
-      ? (lang === 'en' ? 'Please confirm in the workspace' : '请确认任务结果')
-      : kind === 'error'
-        ? buildDesktopErrorPreview(
-            resolvedOutput,
-            lang === 'en' ? 'See Claude output for details' : '请查看 Claude 输出详情',
-          )
-      : (durationText ? (lang === 'en' ? `Duration: ${durationText}` : `耗时：${durationText}`) : '');
-    tasks.push(
-      notifyDesktopBalloon({
-        title: desktopTitle,
-        message: desktopMessage,
-        timeoutMs: config.channels.desktop.balloonMs,
-        clickHint,
-        kind,
-        projectName,
-        onClick: focusEnabled
-          ? () => focusTarget(config, { cwd: cwdToUse, source: sourceName, ppid: process.ppid })
-          : null
-      }).then((r) => ({ channel: 'desktop', ...r }))
+  let notificationSucceeded = false;
+  try {
+    const durationText = formatDurationMs(durationMs);
+    const timestamp = new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' });
+    const statusLine = kind === 'error' ? 'Failed at' : kind === 'confirm' ? 'Alert at' : 'Completed at';
+    const resolvedOutput = String(
+      outputContent
+        || (summaryContext && summaryContext.assistantMessage)
+        || ''
     );
-  }
+    const lines = [
+      `${statusLine}: ${timestamp}`,
+      durationText ? `Duration: ${durationText}` : null,
+      `Source: ${sourceLabel}`
+    ].filter(Boolean);
+    const contentText = lines.join('\n');
+    const tasks = [];
+    const results = [];
 
-  // Add sound notification task (doesn't need summary)
-  if (isChannelEnabled(config, 'sound', sourceName)) {
-    tasks.push(
-      notifySound({ config, title: taskInfo }).then((r) => ({ channel: 'sound', ...r }))
-    );
-  }
+    // Start summary generation immediately (don't await yet)
+    const summaryPromise = skipSummary
+      ? Promise.resolve(null)
+      : summarizeTaskDetailed({ config, taskInfo, contentText, summaryContext })
+        .catch((error) => ({
+          ok: false,
+          error: error && error.message ? error.message : String(error)
+        }));
 
-  // Now wait for summary to complete before adding notifications that need it
-  const summaryResult = await summaryPromise;
-  const summary = summaryResult && summaryResult.ok && summaryResult.summary ? summaryResult.summary : '';
-  const summaryUsed = Boolean(summary);
-  const summaryDiagnostics = buildSummaryDiagnostics(summaryResult, Boolean(skipSummary));
-  const effectiveTaskInfo = summary || taskInfo;
-
-  const titleTaskInfo = effectiveTaskInfo;
-  const title = buildTitle({
-    projectName,
-    taskInfo: titleTaskInfo,
-    sourceLabel,
-    includeSourcePrefixInTitle: true
-  });
-
-  if (isChannelEnabled(config, 'telegram', sourceName)) {
-    tasks.push(
-      notifyTelegram({ config, title, contentText, summaryText: summary, outputContent: resolvedOutput, taskInfo })
-        .then((r) => ({ channel: 'telegram', ...r }))
-    );
-  }
-
-  if (isChannelEnabled(config, 'webhook', sourceName)) {
-    tasks.push(
-      notifyWebhook({
-        config,
-        title,
-        contentText,
-        projectName,
-        timestamp,
-        durationText,
-        sourceName,
-        sourceLabel,
-        taskInfo: effectiveTaskInfo,
-        outputContent: resolvedOutput,
-        summaryUsed,
-        summaryDiagnostics
-      })
-        .then((r) => ({ channel: 'webhook', ...r }))
-    );
-  }
-
-  if (isChannelEnabled(config, 'email', sourceName)) {
-    tasks.push(
-      notifyEmail({ config, title, contentText })
-        .then((r) => ({ channel: 'email', ...r }))
-    );
-  }
-
-  if (isChannelEnabled(config, 'gotify', sourceName)) {
-    tasks.push(
-      notifyGotify({
-        config,
-        kind,
-        projectName,
-        sourceLabel,
-        taskInfo: effectiveTaskInfo,
-        contentText,
-        language: config?.ui?.language,
-      })
-        .then((r) => ({ channel: 'gotify', ...r }))
-    );
-  }
-
-  if (tasks.length === 0) {
-    if (process.platform !== 'win32') {
-      const unsupported = [];
-      if (config.channels.sound && config.channels.sound.enabled && sourceConfig.channels.sound) unsupported.push('sound');
-      if (config.channels.desktop && config.channels.desktop.enabled && sourceConfig.channels.desktop) unsupported.push('desktop');
-      if (unsupported.length) {
-        return { skipped: true, reason: `Unsupported on this platform: ${unsupported.join('/')}`, results: [] };
-      }
+    // Add desktop notification task immediately (uses original taskInfo, doesn't need summary)
+    if (isChannelEnabled(config, 'desktop', sourceName)) {
+      const focusEnabled = Boolean(config?.ui?.autoFocusOnNotify);
+      const focusTargetKey = String(config?.ui?.focusTarget || 'auto');
+      const lang = String(config?.ui?.language || 'zh-CN');
+      const targetLabel = focusTargetKey === 'vscode'
+        ? 'VSCode'
+        : focusTargetKey === 'terminal'
+          ? (lang === 'en' ? 'terminal' : '命令行')
+          : (lang === 'en' ? 'workspace' : '工作界面');
+      const notifyLabel = kind === 'confirm'
+        ? (lang === 'en' ? 'Confirmation needed' : '确认提醒')
+        : kind === 'error'
+          ? (lang === 'en' ? 'Task failed' : '任务失败')
+        : (lang === 'en' ? 'Task completed' : '任务完成');
+      const clickHint = focusEnabled
+        ? (lang === 'en' ? `Return to ${targetLabel}` : `点击返回${targetLabel}`)
+        : '';
+      const desktopTitle = kind === 'confirm'
+        ? notifyLabel
+        : kind === 'error'
+          ? String(taskInfo || notifyLabel)
+        : String(taskInfo || notifyLabel);
+      const desktopMessage = kind === 'confirm'
+        ? (lang === 'en' ? 'Please confirm in the workspace' : '请确认任务结果')
+        : kind === 'error'
+          ? buildDesktopErrorPreview(
+              resolvedOutput,
+              lang === 'en' ? 'See Claude output for details' : '请查看 Claude 输出详情',
+            )
+        : (durationText ? (lang === 'en' ? `Duration: ${durationText}` : `耗时：${durationText}`) : '');
+      tasks.push(
+        notifyDesktopBalloon({
+          title: desktopTitle,
+          message: desktopMessage,
+          timeoutMs: config.channels.desktop.balloonMs,
+          clickHint,
+          kind,
+          projectName,
+          onClick: focusEnabled
+            ? () => focusTarget(config, { cwd: cwdToUse, source: sourceName, ppid: process.ppid })
+            : null
+        }).then((r) => ({ channel: 'desktop', ...r }))
+      );
     }
-    return { skipped: true, reason: 'No notification channels enabled', results: [] };
-  }
 
-  const settled = await Promise.allSettled(tasks);
-  for (const item of settled) {
-    if (item.status === 'fulfilled') results.push(item.value);
-    else results.push({ channel: 'unknown', ok: false, error: item.reason ? String(item.reason) : 'unknown error' });
-  }
+    // Add sound notification task (doesn't need summary)
+    if (isChannelEnabled(config, 'sound', sourceName)) {
+      tasks.push(
+        notifySound({ config, title: taskInfo }).then((r) => ({ channel: 'sound', ...r }))
+      );
+    }
 
-  return { skipped: false, reason: null, results, summary: summaryDiagnostics };
+    // Now wait for summary to complete before adding notifications that need it
+    const summaryResult = await summaryPromise;
+    const summary = summaryResult && summaryResult.ok && summaryResult.summary ? summaryResult.summary : '';
+    const summaryUsed = Boolean(summary);
+    const summaryDiagnostics = buildSummaryDiagnostics(summaryResult, Boolean(skipSummary));
+    const effectiveTaskInfo = summary || taskInfo;
+
+    const titleTaskInfo = effectiveTaskInfo;
+    const title = buildTitle({
+      projectName,
+      taskInfo: titleTaskInfo,
+      sourceLabel,
+      includeSourcePrefixInTitle: true
+    });
+
+    if (isChannelEnabled(config, 'telegram', sourceName)) {
+      tasks.push(
+        notifyTelegram({ config, title, contentText, summaryText: summary, outputContent: resolvedOutput, taskInfo })
+          .then((r) => ({ channel: 'telegram', ...r }))
+      );
+    }
+
+    if (isChannelEnabled(config, 'webhook', sourceName)) {
+      tasks.push(
+        notifyWebhook({
+          config,
+          title,
+          contentText,
+          projectName,
+          timestamp,
+          durationText,
+          sourceName,
+          sourceLabel,
+          taskInfo: effectiveTaskInfo,
+          outputContent: resolvedOutput,
+          summaryUsed,
+          summaryDiagnostics
+        })
+          .then((r) => ({ channel: 'webhook', ...r }))
+      );
+    }
+
+    if (isChannelEnabled(config, 'email', sourceName)) {
+      tasks.push(
+        notifyEmail({ config, title, contentText })
+          .then((r) => ({ channel: 'email', ...r }))
+      );
+    }
+
+    if (isChannelEnabled(config, 'gotify', sourceName)) {
+      tasks.push(
+        notifyGotify({
+          config,
+          kind,
+          projectName,
+          sourceLabel,
+          taskInfo: effectiveTaskInfo,
+          contentText,
+          language: config?.ui?.language,
+        })
+          .then((r) => ({ channel: 'gotify', ...r }))
+      );
+    }
+
+    if (tasks.length === 0) {
+      if (process.platform !== 'win32') {
+        const unsupported = [];
+        if (config.channels.sound && config.channels.sound.enabled && sourceConfig.channels.sound) unsupported.push('sound');
+        if (config.channels.desktop && config.channels.desktop.enabled && sourceConfig.channels.desktop) unsupported.push('desktop');
+        if (unsupported.length) {
+          return { skipped: true, reason: `Unsupported on this platform: ${unsupported.join('/')}`, results: [] };
+        }
+      }
+      return { skipped: true, reason: 'No notification channels enabled', results: [] };
+    }
+
+    const settled = await Promise.allSettled(tasks);
+    for (const item of settled) {
+      if (item.status === 'fulfilled') results.push(item.value);
+      else results.push({ channel: 'unknown', ok: false, error: item.reason ? String(item.reason) : 'unknown error' });
+    }
+
+    notificationSucceeded = results.some((result) => result.ok === true);
+    return { skipped: false, reason: null, results, summary: summaryDiagnostics };
+  } finally {
+    if (codexClaim) codexClaim.complete(notificationSucceeded);
+  }
 }
 
 module.exports = {

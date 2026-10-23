@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { getCodexHookNotificationContext } = require('../src/codex-hook');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -564,6 +565,15 @@ test('codex watch suppresses Codex Desktop subagent and guardian completions fro
   assert.equal(notifications[0].source, 'codex');
   assert.equal(notifications[0].cwd, '/workspace/app');
   assert.equal(notifications[0].outputContent, 'parent done');
+  const hookContext = getCodexHookNotificationContext({
+    hook_event_name: 'Stop',
+    session_id: 'parent-thread',
+    turn_id: 'parent-turn',
+    cwd: '/workspace/app',
+    last_assistant_message: 'parent done',
+  }, 'Codex 完成');
+  assert.equal(notifications[0].dedupeKey, hookContext.dedupeKey,
+    'the native hook and watch fallback must share the completion dedupe key');
 });
 
 test('codex watch loads subagent metadata from the file head when tail seed misses it', async (t) => {
